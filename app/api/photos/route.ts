@@ -21,7 +21,9 @@ export async function POST(request: Request) {
     const file = form.get("file");
     const folderSlug = String(form.get("folderSlug") || "").trim();
     const uploadToken = String(form.get("uploadToken") || "");
-    const media = file instanceof File ? mediaInfo(file.name, file.type) : null;
+    const requestedName = String(form.get("name") || "").trim().slice(0, 180);
+    const name = requestedName || (file instanceof File ? file.name.slice(0, 180) : "");
+    const media = file instanceof File ? mediaInfo(name, file.type) : null;
     if (!(file instanceof File) || !folderSlug || !media) {
       return Response.json({ error: "图片或视频信息无效" }, { status: 400 });
     }
@@ -34,14 +36,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
     }
 
-    const objectKey = createObjectKey(folderSlug, file.name);
+    const objectKey = createObjectKey(folderSlug, name);
     const uploaded = await uploadPhoto(objectKey, Buffer.from(await file.arrayBuffer()));
     const photo = {
       id: crypto.randomUUID(),
       folderSlug,
       objectKey,
       fileId: uploaded.fileId,
-      name: file.name.slice(0, 180),
+      name,
       url: uploaded.url,
       size: file.size,
       mimeType: media.mimeType,

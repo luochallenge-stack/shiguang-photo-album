@@ -1,5 +1,6 @@
 {
   "navigationBarTitleText": "伞兵训练营的时光集",
   "enablePullDownRefresh": true,
-  "backgroundTextStyle": "dark"
+  "backgroundTextStyle": "dark",
+  "onReachBottomDistance": 180
 }

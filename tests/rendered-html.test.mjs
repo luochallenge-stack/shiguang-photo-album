@@ -77,15 +77,18 @@ test("keeps CloudBase credentials server-side", async () => {
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {
-  const [projectText, app, api, login, library, viewer, auth, accessControl] = await Promise.all([
+  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute] = await Promise.all([
     readFile(new URL("../miniprogram/project.config.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/app.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/utils/api.js", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/login/login.js", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/viewer/viewer.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/viewer/viewer.js", import.meta.url), "utf8"),
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
     access(new URL("../miniprogram/images/logo.png", import.meta.url)),
   ]);
   const project = JSON.parse(projectText);
@@ -97,7 +100,19 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(login, /api\/auth\/session/);
   assert.match(library, /api\/library/);
   assert.match(library, /api\/folders\/unlock/);
+  assert.match(library, /wx\.chooseMedia/);
+  assert.match(library, /api\.uploadImage/);
+  assert.match(library, /onReachBottom/);
+  assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
+  assert.match(viewerLogic, /api\/photos\/url/);
+  assert.match(viewerLogic, /encodeURI\(url\)/);
+  assert.match(viewerLogic, /handleVideoError/);
+  assert.match(libraryRoute, /MINI_PROGRAM_PAGE_SIZE = 24/);
+  assert.match(libraryRoute, /thumbnailUrl/);
+  assert.match(libraryRoute, /hasMore/);
+  assert.match(mediaUrlRoute, /2 \* 60 \* 60/);
+  assert.match(mediaUrlRoute, /canReadFolder/);
   assert.match(auth, /authorization\.startsWith\("Bearer "\)/);
   assert.match(accessControl, /x-album-folder-token/);
 });

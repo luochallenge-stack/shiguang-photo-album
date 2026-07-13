@@ -1,13 +1,32 @@
-<view class="viewer-page" wx:if="{{media}}">
-  <video
-    class="video-player"
-    src="{{media.url}}"
-    controls
-    show-center-play-btn
-    show-fullscreen-btn
-    enable-play-gesture
-    object-fit="contain"
-  />
+<view class="viewer-page" wx:if="{{media.id}}">
+  <view class="player-shell">
+    <video
+      wx:if="{{videoUrl}}"
+      id="album-video"
+      class="video-player"
+      src="{{videoUrl}}"
+      controls
+      show-center-play-btn
+      show-fullscreen-btn
+      show-play-btn
+      show-progress
+      enable-play-gesture
+      enable-auto-rotation
+      vslide-gesture-in-fullscreen
+      object-fit="contain"
+      bindloadedmetadata="handleLoaded"
+      bindplay="handlePlay"
+      bindwaiting="handleWaiting"
+      binderror="handleVideoError"
+    />
+    <view class="player-loading" wx:if="{{loading || waiting}}">
+      <text>{{waiting ? '网络缓冲中' : '正在获取播放地址'}}</text>
+    </view>
+    <view class="player-error" wx:if="{{error}}">
+      <text>{{error}}</text>
+      <button bindtap="retry">重新加载</button>
+    </view>
+  </view>
   <view class="video-copy">
     <text class="video-name">{{media.name}}</text>
     <text class="video-meta">{{media.dateLabel}} · {{media.sizeLabel}}</text>

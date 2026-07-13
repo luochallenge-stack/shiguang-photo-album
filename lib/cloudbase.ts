@@ -252,14 +252,14 @@ export async function deletePhotoFile(fileId: string): Promise<void> {
   if (failure) throw new Error(`腾讯云存储删除失败：${failure.code}`);
 }
 
-export async function resolvePhotoUrls(fileIds: string[]): Promise<string[]> {
+export async function resolvePhotoUrls(fileIds: string[], maxAge = 600): Promise<string[]> {
   if (!fileIds.length) return [];
   const cloudbase = getCloudBase();
   const urls = new Map<string, string>();
   for (let index = 0; index < fileIds.length; index += 50) {
     const batch = fileIds.slice(index, index + 50);
     const result = await cloudbase.getTempFileURL({
-      fileList: batch.map((fileID) => ({ fileID, maxAge: 600 })),
+      fileList: batch.map((fileID) => ({ fileID, maxAge })),
     });
     for (const item of result.fileList || []) {
       if (item.fileID && item.tempFileURL) urls.set(item.fileID, item.tempFileURL);

@@ -55,6 +55,42 @@ function request(path, options = {}) {
   });
 }
 
+function uploadImage(filePath, formData, onProgress) {
+  const token = getSessionToken();
+  return new Promise((resolve, reject) => {
+    const task = wx.uploadFile({
+      url: `${API_BASE}/api/photos`,
+      filePath,
+      name: "file",
+      formData,
+      header: {
+        "x-album-client": "miniprogram",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      timeout: 120000,
+      success(response) {
+        let payload = {};
+        try {
+          payload = JSON.parse(response.data || "{}");
+        } catch {
+          payload = {};
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(payload);
+          return;
+        }
+        const error = new Error(payload.error || `上传失败 (${response.statusCode})`);
+        error.statusCode = response.statusCode;
+        reject(error);
+      },
+      fail(error) {
+        reject(new Error(error.errMsg || "上传连接失败"));
+      },
+    });
+    if (typeof onProgress === "function") task.onProgressUpdate(onProgress);
+  });
+}
+
 function authenticate(mode, data) {
   return request(`/api/auth/${mode}`, { method: "POST", data }).then((payload) => {
     if (!payload.sessionToken || !payload.user) throw new Error("服务器没有返回小程序登录凭证");
@@ -72,4 +108,5 @@ module.exports = {
   getSessionToken,
   request,
   saveSession,
+  uploadImage,
 };

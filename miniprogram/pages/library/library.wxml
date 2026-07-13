@@ -28,23 +28,30 @@
   <view class="content-heading">
     <view>
       <text class="folder-title">{{selectedFolderName}}</text>
-      <text class="photo-count">{{photos.length}} 项影像</text>
+      <text class="photo-count">{{total}} 项影像</text>
     </view>
+    <button wx:if="{{user.role === 'admin'}}" class="upload-button" bindtap="chooseImages" disabled="{{uploading}}">＋ 上传</button>
   </view>
 
-  <view class="loading" wx:if="{{loading}}">正在读取共同的时光</view>
+  <view class="skeleton-grid" wx:if="{{loading}}">
+    <view class="skeleton-item" wx:for="{{skeletons}}" wx:key="*this">
+      <view class="skeleton-image" />
+      <view class="skeleton-line" />
+      <view class="skeleton-line short" />
+    </view>
+  </view>
   <view class="error-state" wx:elif="{{error}}">
     <text>{{error}}</text>
     <button bindtap="retry">重新加载</button>
   </view>
   <view class="empty-state" wx:elif="{{photos.length === 0}}">
     <text class="empty-title">这里还没有影像</text>
-    <text class="empty-copy">照片和视频可以在网页管理端上传。</text>
+    <text class="empty-copy">{{user.role === 'admin' ? '点击上传，添加第一张照片。' : '管理员上传后，这里就会出现新的影像。'}}</text>
   </view>
   <view class="media-grid" wx:else>
     <view class="media-item" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
       <view class="media-preview">
-        <image wx:if="{{!item.video}}" src="{{item.url}}" mode="aspectFill" lazy-load />
+        <image wx:if="{{!item.video}}" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load data-id="{{item.id}}" binderror="thumbnailError" />
         <view wx:else class="video-placeholder">
           <view class="play-button"><view class="play-triangle" /></view>
           <text>视频</text>
@@ -56,6 +63,8 @@
       </view>
     </view>
   </view>
+  <view class="load-more" wx:if="{{loadingMore}}">正在加载更多</view>
+  <view class="load-more" wx:elif="{{photos.length > 0 && !hasMore}}">已经看到全部影像</view>
 
   <view class="modal-backdrop" wx:if="{{unlockOpen}}" bindtap="closeUnlock">
     <view class="unlock-dialog" catchtap="noop">
@@ -68,5 +77,13 @@
         <button class="unlock-button" loading="{{unlocking}}" disabled="{{unlocking || !unlockPassword}}" bindtap="unlockFolder">解锁</button>
       </view>
     </view>
+  </view>
+
+  <view class="upload-status" wx:if="{{uploading}}">
+    <view class="upload-status-copy">
+      <text>{{uploadLabel}}</text>
+      <text>{{uploadProgress}}%</text>
+    </view>
+    <view class="upload-track"><view class="upload-value" style="width: {{uploadProgress}}%" /></view>
   </view>
 </view>
