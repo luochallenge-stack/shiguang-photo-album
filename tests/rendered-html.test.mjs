@@ -103,6 +103,9 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /wx\.chooseMedia/);
   assert.match(library, /api\.uploadImage/);
   assert.match(library, /onReachBottom/);
+  assert.match(library, /MAX_UPLOAD_COUNT = 50/);
+  assert.match(library, /PICKER_BATCH_SIZE = 9/);
+  assert.match(library, /uploadSelectedImages/);
   assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
   assert.match(viewerLogic, /api\/photos\/url/);

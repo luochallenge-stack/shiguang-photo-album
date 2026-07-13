@@ -79,6 +79,28 @@
     </view>
   </view>
 
+  <view class="selection-backdrop" wx:if="{{selectionOpen}}">
+    <view class="selection-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">批量上传</text>
+      <text class="dialog-title">已选择 {{selectedCount}} / 50 张</text>
+      <text class="dialog-copy">每轮最多添加 9 张，可以连续添加多轮，再作为一个上传任务统一处理。</text>
+      <view class="selection-actions">
+        <button
+          class="selection-more"
+          bindtap="addMoreImages"
+          loading="{{selectingImages}}"
+          disabled="{{selectingImages || selectedCount >= 50}}"
+        >继续添加</button>
+        <button
+          class="selection-upload"
+          bindtap="uploadSelectedImages"
+          disabled="{{selectingImages || !selectedCount}}"
+        >上传 {{selectedCount}} 张</button>
+      </view>
+      <button class="selection-cancel" bindtap="cancelImageSelection" disabled="{{selectingImages}}">取消本次选择</button>
+    </view>
+  </view>
+
   <view class="upload-status" wx:if="{{uploading}}">
     <view class="upload-status-copy">
       <text>{{uploadLabel}}</text>

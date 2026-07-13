@@ -48,6 +48,14 @@
 .cancel-button { width: 38%; color: #53625d; background: #edf1ef; }
 .unlock-button { width: 62%; color: #ffffff; background: #21483f; }
 .unlock-button[disabled] { color: rgba(255,255,255,.7); background: #6f8982; }
+.selection-backdrop { position: fixed; z-index: 22; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(13,25,21,.52); }
+.selection-dialog { width: 100%; padding: 38rpx 36rpx calc(30rpx + env(safe-area-inset-bottom)); border-radius: 18rpx 18rpx 0 0; background: #ffffff; box-sizing: border-box; }
+.selection-actions { display: flex; gap: 16rpx; margin-top: 28rpx; }
+.selection-actions button { width: 50%; height: 78rpx; margin: 0; border-radius: 10rpx; font-size: 24rpx; font-weight: 700; line-height: 78rpx; }
+.selection-more { color: #21483f; background: #e4ece9; }
+.selection-upload { color: #ffffff; background: #b85246; }
+.selection-actions button[disabled] { color: #9ba6a2; background: #e7ebe9; }
+.selection-cancel { width: 100%; height: 66rpx; margin: 16rpx 0 0; color: #73807c; background: transparent; font-size: 22rpx; line-height: 66rpx; }
 .upload-status { position: fixed; z-index: 18; right: 24rpx; bottom: calc(24rpx + env(safe-area-inset-bottom)); left: 24rpx; padding: 22rpx 24rpx; border-radius: 10rpx; color: #ffffff; background: #21483f; box-shadow: 0 12rpx 36rpx rgba(18,45,38,.22); }
 .upload-status-copy { display: flex; align-items: center; justify-content: space-between; font-size: 22rpx; }
 .upload-track { height: 8rpx; margin-top: 16rpx; overflow: hidden; border-radius: 4rpx; background: rgba(255,255,255,.2); }

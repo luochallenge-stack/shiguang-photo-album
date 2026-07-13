@@ -2,7 +2,10 @@ const api = require("../../utils/api");
 
 const PAGE_SIZE = 24;
 const COMPRESS_THRESHOLD = 8 * 1024 * 1024;
+const MAX_UPLOAD_COUNT = 50;
+const PICKER_BATCH_SIZE = 9;
 let libraryRequestId = 0;
+let pendingUploadFiles = [];
 
 function formatSize(value) {
   if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -64,6 +67,9 @@ Page({
     uploading: false,
     uploadProgress: 0,
     uploadLabel: "",
+    selectionOpen: false,
+    selectingImages: false,
+    selectedCount: 0,
   },
 
   onLoad(options) {
@@ -83,6 +89,10 @@ Page({
     if (this.data.hasMore && !this.data.loadingMore && !this.data.loading) {
       this.loadLibrary(this.data.selectedFolder, false, true);
     }
+  },
+
+  onUnload() {
+    pendingUploadFiles = [];
   },
 
   loadLibrary(folderSlug = "", refreshing = false, append = false) {
@@ -232,12 +242,43 @@ Page({
       wx.showToast({ title: "请先选择目标文件夹", icon: "none" });
       return;
     }
+    if (this.data.uploading) return;
+    pendingUploadFiles = [];
+    this.setData({ selectionOpen: true, selectedCount: 0 }, () => this.addMoreImages());
+  },
+
+  addMoreImages() {
+    if (this.data.uploading || this.data.selectingImages) return;
+    const remaining = MAX_UPLOAD_COUNT - pendingUploadFiles.length;
+    if (remaining <= 0) {
+      wx.showToast({ title: "本次已选满 50 张", icon: "none" });
+      return;
+    }
+    this.setData({ selectingImages: true });
     wx.chooseMedia({
-      count: 9,
+      count: Math.min(PICKER_BATCH_SIZE, remaining),
       mediaType: ["image"],
       sourceType: ["album", "camera"],
-      success: ({ tempFiles }) => this.uploadImages(tempFiles || []),
+      success: ({ tempFiles }) => {
+        const selected = (tempFiles || []).slice(0, remaining);
+        pendingUploadFiles = pendingUploadFiles.concat(selected);
+        this.setData({ selectedCount: pendingUploadFiles.length });
+      },
+      complete: () => this.setData({ selectingImages: false }),
     });
+  },
+
+  cancelImageSelection() {
+    if (this.data.selectingImages) return;
+    pendingUploadFiles = [];
+    this.setData({ selectionOpen: false, selectedCount: 0 });
+  },
+
+  uploadSelectedImages() {
+    if (!pendingUploadFiles.length || this.data.selectingImages) return;
+    const files = pendingUploadFiles.slice(0, MAX_UPLOAD_COUNT);
+    pendingUploadFiles = [];
+    this.setData({ selectionOpen: false, selectedCount: 0 }, () => this.uploadImages(files));
   },
 
   async uploadImages(files) {
