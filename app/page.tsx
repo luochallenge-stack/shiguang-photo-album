@@ -19,15 +19,21 @@ import {
   LoaderCircle,
   Maximize2,
   Pencil,
+  Play,
   Plus,
   Search,
   Share2,
   ShieldCheck,
   Trash2,
   Upload,
+  Video,
   X,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
+
+const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
+const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
 
 type FolderItem = {
   id: string;
@@ -75,6 +81,7 @@ async function readJson<T>(response: Response): Promise<T> {
 function formatSize(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -93,8 +100,27 @@ function downloadUrl(url: string, filename: string): string {
   return `${url}${separator}response-content-disposition=${disposition}`;
 }
 
-async function imageDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
-  if (!file.type.startsWith("image/") || file.type.includes("heic") || file.type.includes("heif")) {
+async function mediaDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
+  const mimeType = fileMimeType(file);
+  if (isVideoMimeType(mimeType)) {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("无法读取视频信息"));
+        video.src = objectUrl;
+      });
+      return { width: video.videoWidth || null, height: video.videoHeight || null };
+    } catch {
+      return { width: null, height: null };
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+  if (!mimeType.startsWith("image/") || mimeType.includes("heic") || mimeType.includes("heif")) {
     return { width: null, height: null };
   }
   const objectUrl = URL.createObjectURL(file);
@@ -124,11 +150,25 @@ function fileMimeType(file: File): string {
     gif: "image/gif",
     heic: "image/heic",
     heif: "image/heif",
+    mp4: "video/mp4",
+    mov: "video/quicktime",
+    m4v: "video/x-m4v",
+    webm: "video/webm",
+    mpeg: "video/mpeg",
+    mpg: "video/mpeg",
   };
   return byExtension[extension || ""] || "application/octet-stream";
 }
 
-function uploadToCloudBase(
+type DirectUploadResponse = {
+  upload: {
+    url: string;
+    headers: Record<string, string>;
+    ticket: string;
+  };
+};
+
+async function uploadToCloudBase(
   folderSlug: string,
   uploadToken: string,
   file: File,
@@ -136,32 +176,52 @@ function uploadToCloudBase(
   adminKey: string,
   onProgress: (progress: number) => void,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("folderSlug", folderSlug);
-    if (uploadToken) form.append("uploadToken", uploadToken);
-    if (dimensions.width) form.append("width", String(dimensions.width));
-    if (dimensions.height) form.append("height", String(dimensions.height));
-    form.append("file", file);
+  const authHeaders = {
+    "content-type": "application/json",
+    ...(adminKey ? { "x-album-admin-key": adminKey } : {}),
+  };
+  const prepared = await readJson<DirectUploadResponse>(
+    await fetch("/api/photos/upload", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        folderSlug,
+        uploadToken,
+        name: file.name,
+        size: file.size,
+        mimeType: fileMimeType(file),
+        width: dimensions.width,
+        height: dimensions.height,
+      }),
+    }),
+  );
+  onProgress(3);
+  await new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", "/api/photos");
-    if (adminKey) request.setRequestHeader("x-album-admin-key", adminKey);
+    request.open("PUT", prepared.upload.url);
+    for (const [name, value] of Object.entries(prepared.upload.headers)) request.setRequestHeader(name, value);
     request.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+      if (event.lengthComputable) onProgress(3 + Math.round((event.loaded / event.total) * 92));
     };
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) resolve();
-      else {
-        try {
-          reject(new Error((JSON.parse(request.responseText) as { error?: string }).error || `上传失败 (${request.status})`));
-        } catch {
-          reject(new Error(`上传失败 (${request.status})`));
-        }
-      }
+      else reject(new Error(`腾讯云存储上传失败 (${request.status})`));
     };
-    request.onerror = () => reject(new Error("上传网络中断"));
-    request.send(form);
+    request.onerror = () => reject(new Error("上传网络中断或云存储跨域校验失败"));
+    request.send(file);
   });
+  onProgress(96);
+  await readJson<{ photo: PhotoItem }>(
+    await fetch("/api/photos/upload", {
+      method: "PATCH",
+      headers: authHeaders,
+      body: JSON.stringify({ ticket: prepared.upload.ticket, uploadToken }),
+    }),
+  );
+}
+
+function mediaLabel(photo: PhotoItem): "照片" | "视频" {
+  return isVideoMimeType(photo.mimeType) ? "视频" : "照片";
 }
 
 export default function Home() {
@@ -237,6 +297,10 @@ export default function Home() {
   }, [adminKey, selectedFolder]);
 
   useEffect(() => {
+    if (window.location.hostname === LEGACY_ALBUM_HOST) {
+      window.location.replace(new URL(`${window.location.pathname}${window.location.search}${window.location.hash}`, PUBLIC_ALBUM_ORIGIN));
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get("folder") || "";
     const uploadToken = params.get("upload") || "";
@@ -316,8 +380,11 @@ export default function Home() {
   };
 
   const uploadFiles = async (fileList: FileList | File[]) => {
-    const files = Array.from(fileList).filter((file) => fileMimeType(file).startsWith("image/"));
-    if (!files.length) return;
+    const files = Array.from(fileList).filter((file) => Boolean(mediaInfo(file.name, fileMimeType(file))));
+    if (!files.length) {
+      setError("请选择 JPG、PNG、WebP、GIF、HEIC、MP4、MOV、M4V、WebM 或 MPEG 文件");
+      return;
+    }
     if (!selectedFolder) {
       setError("请先选择或新建一个文件夹");
       return;
@@ -338,8 +405,11 @@ export default function Home() {
         { id: uploadId, name: file.name, progress: 0, status: "uploading" },
       ]);
       try {
-        if (file.size > 50 * 1024 * 1024) throw new Error("单张图片不能超过 50 MB");
-        const dimensions = await imageDimensions(file);
+        const media = mediaInfo(file.name, fileMimeType(file));
+        if (!media) throw new Error("不支持这种文件格式");
+        const sizeError = mediaSizeError(media.kind, file.size);
+        if (sizeError) throw new Error(sizeError);
+        const dimensions = await mediaDimensions(file);
         await uploadToCloudBase(
           selectedFolder,
           isAdmin ? "" : sharedUploadToken,
@@ -514,7 +584,7 @@ export default function Home() {
       setEditingPhoto(null);
       setEditingName("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "重命名照片失败");
+      setError(cause instanceof Error ? cause.message : "重命名文件失败");
     } finally {
       setSavingPhoto(false);
     }
@@ -541,7 +611,7 @@ export default function Home() {
       setPreview((current) => current?.id === deletedId ? null : current);
       setDeletingPhoto(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "删除照片失败");
+      setError(cause instanceof Error ? cause.message : "删除文件失败");
     } finally {
       setSavingPhoto(false);
     }
@@ -553,8 +623,8 @@ export default function Home() {
         <div className="brand-block">
           <div className="brand-mark"><Images size={20} strokeWidth={2.2} /></div>
           <div>
-            <strong>拾光册</strong>
-            <span>私人影像空间</span>
+            <strong>伞兵训练营的时光集</strong>
+            <span>照片与视频影像集</span>
           </div>
         </div>
 
@@ -569,7 +639,7 @@ export default function Home() {
           </div>
           <button className={`folder-row ${selectedFolder ? "" : "active"}`} onClick={() => chooseFolder("")}>
             <Images size={18} />
-            <span>全部照片</span>
+            <span>全部影像</span>
             <b>{totalPhotos}</b>
           </button>
           {folders.map((folder) => (
@@ -606,12 +676,12 @@ export default function Home() {
         <header className="topbar">
           <div className="breadcrumb">
             <span>相册</span><ChevronRight size={15} />
-            <strong>{activeFolder?.name || "全部照片"}</strong>
+            <strong>{activeFolder?.name || "全部影像"}</strong>
           </div>
           <div className="top-actions">
             <label className="search-box">
               <Search size={17} />
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索照片" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索照片或视频" />
             </label>
             {selectedFolder && (
               <button className="secondary-button" onClick={copyFolderLink}>
@@ -634,10 +704,10 @@ export default function Home() {
                 {activeFolder?.locked ? "更换密码" : "设置密码"}
               </button>
             )}
-            <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片" : "需要上传权限"}>
-              <Upload size={18} /> 上传照片
+            <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
+              <Upload size={18} /> 上传影像
             </button>
-            <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={onFileChange} />
+            <input ref={fileInput} type="file" accept="image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,video/mpeg,.mov,.m4v" multiple hidden onChange={onFileChange} />
           </div>
         </header>
 
@@ -645,13 +715,13 @@ export default function Home() {
           {!storageConfigured && (
             <div className="notice" role="status">
               <HardDrive size={18} />
-              <span><strong>等待接入腾讯云存储</strong> 配置完成后即可在线上传与查看原图。</span>
+              <span><strong>等待接入腾讯云存储</strong> 配置完成后即可在线上传与查看照片和视频。</span>
             </div>
           )}
           {sharedUploadToken && sharedFolder === selectedFolder && !isAdmin && (
             <div className="share-notice" role="status">
               <Share2 size={17} />
-              <span>你可以向「{activeFolder?.name || "当前文件夹"}」上传照片</span>
+              <span>你可以向「{activeFolder?.name || "当前文件夹"}」上传照片或视频</span>
             </div>
           )}
           {error && (
@@ -663,8 +733,8 @@ export default function Home() {
 
           <div className="section-heading">
             <div>
-              <h1>{activeFolder?.name || "全部照片"}</h1>
-              <p>{folderLocked ? "需要密码访问" : `${visiblePhotos.length} 张照片`}</p>
+              <h1>{activeFolder?.name || "全部影像"}</h1>
+              <p>{folderLocked ? "需要密码访问" : `${visiblePhotos.length} 项影像`}</p>
             </div>
             {!folderLocked && <div className="view-toggle" aria-label="视图切换">
               <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="网格视图" aria-label="网格视图"><Grid2X2 size={17} /></button>
@@ -683,17 +753,17 @@ export default function Home() {
             >
               <Upload size={19} />
               <span>添加到「{activeFolder?.name}」</span>
-              <small>JPG、PNG、WebP、GIF、HEIC</small>
+              <small>图片最大 50 MB · 视频最大 500 MB</small>
             </div>
           )}
 
           {loading ? (
-            <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取照片</div>
+            <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取影像</div>
           ) : folderLocked ? (
             <section className="locked-state" aria-labelledby="locked-folder-title">
               <span className="lock-visual"><LockKeyhole size={30} /></span>
               <h2 id="locked-folder-title">这个文件夹已加密</h2>
-              <p>输入密码后即可查看和下载其中的照片。</p>
+              <p>输入密码后即可查看和下载其中的照片与视频。</p>
               <form className="unlock-form" onSubmit={(event) => { event.preventDefault(); void unlockFolder(); }}>
                 <input
                   className="text-input"
@@ -716,7 +786,10 @@ export default function Home() {
               {visiblePhotos.map((photo) => (
                 <article className="photo-card" key={photo.id}>
                   <button className="photo-preview" onClick={() => setPreview(photo)} aria-label={`预览 ${photo.name}`}>
-                    <img src={photo.url} alt={photo.name} loading="lazy" />
+                    {isVideoMimeType(photo.mimeType)
+                      ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
+                      : <img src={photo.url} alt={photo.name} loading="lazy" />}
+                    {isVideoMimeType(photo.mimeType) && <span className="play-badge"><Play size={19} fill="currentColor" /></span>}
                     <span className="expand"><Maximize2 size={16} /></span>
                   </button>
                   <div className="photo-meta">
@@ -728,10 +801,10 @@ export default function Home() {
                       {isAdmin && (
                         <>
                           <button className="icon-button" onClick={() => openRename(photo)} title="重命名" aria-label={`重命名 ${photo.name}`}><Pencil size={16} /></button>
-                          <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title="删除照片" aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
+                          <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title={`删除${mediaLabel(photo)}`} aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
                         </>
                       )}
-                      <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原图" aria-label={`下载 ${photo.name}`}>
+                      <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原文件" aria-label={`下载 ${photo.name}`}>
                         <Download size={17} />
                       </a>
                     </div>
@@ -742,16 +815,16 @@ export default function Home() {
           ) : (
             <div className="empty-state">
               <div className="empty-visual">
-                <span><ImageIcon size={28} /></span>
+                <span><Video size={28} /></span>
                 <span><Images size={32} /></span>
                 <span><ImageIcon size={25} /></span>
               </div>
-              <h2>{selectedFolder ? "这个文件夹还是空的" : "还没有照片"}</h2>
-              <p>{selectedFolder ? "添加第一批照片，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片。"}</p>
+              <h2>{selectedFolder ? "这个文件夹还是空的" : "还没有影像"}</h2>
+              <p>{selectedFolder ? "添加第一批照片或视频，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片与视频。"}</p>
               {(canUpload || isAdmin) && (
                 <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : setNewFolderOpen(true)}>
                   {canUpload ? <Upload size={18} /> : <Plus size={18} />}
-                  {canUpload ? "上传照片" : "新建文件夹"}
+                  {canUpload ? "上传影像" : "新建文件夹"}
                 </button>
               )}
             </div>
@@ -830,7 +903,7 @@ export default function Home() {
               <button className="icon-button" disabled={savingSecurity} onClick={() => setSecurityOpen(false)} aria-label="关闭"><X size={18} /></button>
             </div>
             <p className="dialog-message security-message">
-              加锁后，文件夹中的照片不会出现在全部照片中，访问该文件夹需要输入密码。
+              加锁后，文件夹中的照片和视频不会出现在全部影像中，访问该文件夹需要输入密码。
             </p>
             <label className="field-label" htmlFor="folder-password">{activeFolder.locked ? "新密码" : "文件夹密码"}</label>
             <input
@@ -866,10 +939,10 @@ export default function Home() {
         <div className="modal-backdrop" onMouseDown={() => !savingPhoto && setEditingPhoto(null)}>
           <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="rename-photo-title">
             <div className="dialog-heading">
-              <div><span className="dialog-icon"><Pencil size={19} /></span><h2 id="rename-photo-title">重命名照片</h2></div>
+              <div><span className="dialog-icon"><Pencil size={19} /></span><h2 id="rename-photo-title">重命名{mediaLabel(editingPhoto)}</h2></div>
               <button className="icon-button" disabled={savingPhoto} onClick={() => setEditingPhoto(null)} aria-label="关闭"><X size={18} /></button>
             </div>
-            <label className="field-label" htmlFor="photo-name">照片名称</label>
+            <label className="field-label" htmlFor="photo-name">文件名称</label>
             <input id="photo-name" className="text-input" autoFocus maxLength={180} value={editingName} onChange={(event) => setEditingName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void renamePhoto(); }} />
             <div className="dialog-actions">
               <button className="secondary-button" disabled={savingPhoto} onClick={() => setEditingPhoto(null)}>取消</button>
@@ -885,10 +958,10 @@ export default function Home() {
         <div className="modal-backdrop" onMouseDown={() => !savingPhoto && setDeletingPhoto(null)}>
           <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="delete-photo-title">
             <div className="dialog-heading">
-              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-photo-title">删除照片</h2></div>
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-photo-title">删除{mediaLabel(deletingPhoto)}</h2></div>
               <button className="icon-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)} aria-label="关闭"><X size={18} /></button>
             </div>
-            <p className="dialog-message">确定删除「{deletingPhoto.name}」吗？原图和相册记录都会被永久删除，无法恢复。</p>
+            <p className="dialog-message">确定删除「{deletingPhoto.name}」吗？原文件和相册记录都会被永久删除，无法恢复。</p>
             <div className="dialog-actions">
               <button className="secondary-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)}>取消</button>
               <button className="danger-button" disabled={savingPhoto} onClick={() => void deletePhoto()}>
@@ -909,17 +982,19 @@ export default function Home() {
             <div>
               {isAdmin && (
                 <>
-                  <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label="重命名照片"><Pencil size={17} /></button>
-                  <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title="删除照片" aria-label="删除照片"><Trash2 size={17} /></button>
+                  <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label={`重命名${mediaLabel(preview)}`}><Pencil size={17} /></button>
+                  <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title={`删除${mediaLabel(preview)}`} aria-label={`删除${mediaLabel(preview)}`}><Trash2 size={17} /></button>
                 </>
               )}
-              <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制原图链接" aria-label="复制原图链接"><Clipboard size={18} /></button>
-              <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} title="下载原图" aria-label="下载原图"><Download size={18} /></a>
+              <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制文件链接" aria-label="复制文件链接"><Clipboard size={18} /></button>
+              <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} title="下载原文件" aria-label="下载原文件"><Download size={18} /></a>
               <button className="icon-button dark" onClick={() => setPreview(null)} title="关闭" aria-label="关闭预览"><X size={20} /></button>
             </div>
           </div>
           <div className="preview-canvas" onClick={() => setPreview(null)}>
-            <img src={preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />
+            {isVideoMimeType(preview.mimeType)
+              ? <video src={preview.url} controls autoPlay playsInline onClick={(event) => event.stopPropagation()} />
+              : <img src={preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />}
           </div>
         </div>
       )}

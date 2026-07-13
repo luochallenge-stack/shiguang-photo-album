@@ -132,7 +132,7 @@ export function createObjectKey(folderSlug: string, filename: string): string {
     .slice(0, 80);
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "");
   const nonce = crypto.randomUUID().slice(0, 8);
-  return `albums/${folderSlug}/${stamp}-${nonce}-${normalized || "photo"}${extension.replace(/[^a-z0-9.]/g, "")}`;
+  return `albums/${folderSlug}/${stamp}-${nonce}-${normalized || "media"}${extension.replace(/[^a-z0-9.]/g, "")}`;
 }
 
 export async function uploadPhoto(objectKey: string, contents: Buffer): Promise<{ fileId: string; url: string }> {
@@ -141,6 +141,35 @@ export async function uploadPhoto(objectKey: string, contents: Buffer): Promise<
   if (!uploaded.fileID) throw new Error("腾讯云存储没有返回文件标识");
   const [resolved] = await resolvePhotoUrls([uploaded.fileID]);
   return { fileId: uploaded.fileID, url: resolved || uploaded.fileID };
+}
+
+export async function createDirectUpload(objectKey: string, mimeType: string) {
+  const result = await getCloudBase().getUploadMetadata({ cloudPath: objectKey });
+  const { url, token, authorization, fileId, cosFileId } = result.data;
+  if (!url || !token || !authorization || !fileId || !cosFileId) {
+    throw new Error("腾讯云存储没有返回完整的上传凭证");
+  }
+  return {
+    url,
+    fileId,
+    headers: {
+      Signature: authorization,
+      authorization,
+      "x-cos-security-token": token,
+      "x-cos-meta-fileid": cosFileId,
+      "Content-Type": mimeType,
+      key: encodeURIComponent(objectKey),
+    },
+  };
+}
+
+export async function confirmUploadedFile(fileId: string, expectedSize: number): Promise<void> {
+  const result = await getCloudBase().getFileInfo({ fileList: [{ fileID: fileId, maxAge: 60 }] });
+  const info = result.fileList[0];
+  if (!info || info.code !== "SUCCESS") throw new Error("腾讯云存储尚未确认上传文件");
+  if (typeof info.size === "number" && info.size !== expectedSize) {
+    throw new Error("上传文件大小校验失败");
+  }
 }
 
 export async function deletePhotoFile(fileId: string): Promise<void> {

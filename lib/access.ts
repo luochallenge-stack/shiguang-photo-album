@@ -2,6 +2,7 @@ import { getUploadTokenRecord, type AlbumFolder } from "./cloudbase";
 
 const FOLDER_ACCESS_SECONDS = 12 * 60 * 60;
 const PASSWORD_ITERATIONS = 210_000;
+const UPLOAD_TICKET_SECONDS = 2 * 60 * 60;
 const encoder = new TextEncoder();
 
 function constantEqual(left: string, right: string): boolean {
@@ -68,6 +69,49 @@ async function sign(value: string): Promise<string> {
   if (!secret) throw new Error("相册访问签名密钥尚未配置");
   const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return toBase64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value))));
+}
+
+export type MediaUploadTicket = {
+  id: string;
+  folderSlug: string;
+  objectKey: string;
+  fileId: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+  expiresAt: number;
+};
+
+export async function createMediaUploadTicket(data: Omit<MediaUploadTicket, "expiresAt">): Promise<string> {
+  const payload = toBase64Url(JSON.stringify({
+    ...data,
+    expiresAt: Date.now() + UPLOAD_TICKET_SECONDS * 1000,
+  }));
+  return `${payload}.${await sign(payload)}`;
+}
+
+export async function readMediaUploadTicket(ticket: string): Promise<MediaUploadTicket | null> {
+  const [payload, signature] = ticket.split(".");
+  if (!payload || !signature || !constantEqual(signature, await sign(payload))) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as MediaUploadTicket;
+    return data
+      && typeof data.id === "string"
+      && typeof data.folderSlug === "string"
+      && typeof data.objectKey === "string"
+      && typeof data.fileId === "string"
+      && typeof data.name === "string"
+      && typeof data.size === "number"
+      && typeof data.mimeType === "string"
+      && typeof data.expiresAt === "number"
+      && data.expiresAt > Date.now()
+      ? data
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createFolderAccessCookie(folder: AlbumFolder): Promise<string> {

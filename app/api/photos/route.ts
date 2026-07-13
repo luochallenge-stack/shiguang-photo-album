@@ -9,8 +9,7 @@ import {
   uploadPhoto,
 } from "../../../lib/cloudbase";
 import { canWriteFolder, isAdminRequest, unauthorized } from "../../../lib/access";
-
-const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]);
+import { mediaInfo, mediaSizeError } from "../../../lib/media";
 
 export async function POST(request: Request) {
   try {
@@ -18,12 +17,12 @@ export async function POST(request: Request) {
     const file = form.get("file");
     const folderSlug = String(form.get("folderSlug") || "").trim();
     const uploadToken = String(form.get("uploadToken") || "");
-    const mimeType = file instanceof File ? file.type : "";
-    const imageExtension = file instanceof File && /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name);
-    if (!(file instanceof File) || !folderSlug || (!IMAGE_TYPES.has(mimeType) && !imageExtension)) {
-      return Response.json({ error: "图片信息无效" }, { status: 400 });
+    const media = file instanceof File ? mediaInfo(file.name, file.type) : null;
+    if (!(file instanceof File) || !folderSlug || !media) {
+      return Response.json({ error: "图片或视频信息无效" }, { status: 400 });
     }
-    if (file.size > 50 * 1024 * 1024) return Response.json({ error: "单张图片不能超过 50 MB" }, { status: 413 });
+    const sizeError = mediaSizeError(media.kind, file.size);
+    if (sizeError) return Response.json({ error: sizeError }, { status: 413 });
     if (!(await canWriteFolder(request, folderSlug, uploadToken))) return unauthorized();
 
     const folder = await findFolder(folderSlug);
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
       name: file.name.slice(0, 180),
       url: uploaded.url,
       size: file.size,
-      mimeType: mimeType || "application/octet-stream",
+      mimeType: media.mimeType,
       width: Number(form.get("width")) || null,
       height: Number(form.get("height")) || null,
       createdAt: new Date().toISOString(),
@@ -49,7 +48,7 @@ export async function POST(request: Request) {
     await createPhotoRecord(photo);
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "保存图片信息失败";
+    const message = error instanceof Error ? error.message : "保存图片或视频信息失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }
@@ -60,15 +59,15 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as { id?: unknown; name?: unknown };
     const id = typeof body.id === "string" ? body.id.trim() : "";
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!id || !name) return Response.json({ error: "照片名称不能为空" }, { status: 400 });
-    if (name.length > 180) return Response.json({ error: "照片名称不能超过 180 个字符" }, { status: 400 });
+    if (!id || !name) return Response.json({ error: "文件名称不能为空" }, { status: 400 });
+    if (name.length > 180) return Response.json({ error: "文件名称不能超过 180 个字符" }, { status: 400 });
 
     const photo = await findPhoto(id);
-    if (!photo) return Response.json({ error: "照片不存在" }, { status: 404 });
+    if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
     await renamePhotoRecord(id, name);
     return Response.json({ photo: { ...photo, name } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "重命名照片失败";
+    const message = error instanceof Error ? error.message : "重命名文件失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }
@@ -77,15 +76,15 @@ export async function DELETE(request: Request) {
   try {
     if (!isAdminRequest(request)) return unauthorized();
     const id = new URL(request.url).searchParams.get("id")?.trim() || "";
-    if (!id) return Response.json({ error: "缺少照片标识" }, { status: 400 });
+    if (!id) return Response.json({ error: "缺少文件标识" }, { status: 400 });
 
     const photo = await findPhoto(id);
-    if (!photo) return Response.json({ error: "照片不存在" }, { status: 404 });
+    if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
     await deletePhotoFile(photo.fileId);
     await deletePhotoRecord(id);
     return Response.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "删除照片失败";
+    const message = error instanceof Error ? error.message : "删除文件失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }

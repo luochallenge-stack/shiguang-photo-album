@@ -49,7 +49,8 @@ button { color: inherit; }
   color: white;
 }
 
-.brand-block { display: flex; align-items: center; gap: 11px; padding: 0 8px 28px; }
+.brand-block { display: flex; align-items: center; gap: 10px; padding: 0 3px 28px; }
+.brand-block > div:last-child { min-width: 0; }
 .brand-mark {
   width: 38px;
   height: 38px;
@@ -60,7 +61,7 @@ button { color: inherit; }
   background: var(--yellow);
   box-shadow: 0 6px 18px rgba(0, 0, 0, .17);
 }
-.brand-block strong { display: block; font-size: 18px; line-height: 1.15; }
+.brand-block strong { display: block; white-space: nowrap; font-size: 15px; line-height: 1.2; }
 .brand-block span { display: block; margin-top: 4px; color: rgba(255,255,255,.6); font-size: 11px; }
 
 .folder-nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
@@ -251,8 +252,9 @@ button { color: inherit; }
 .photo-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: white; transition: transform .16s, box-shadow .16s; }
 .photo-grid .photo-card:hover { transform: translateY(-2px); box-shadow: 0 9px 24px rgba(22,43,36,.09); }
 .photo-preview { position: relative; width: 100%; aspect-ratio: 4 / 3; display: block; overflow: hidden; padding: 0; border: 0; background: #e8ecea; cursor: zoom-in; }
-.photo-preview img { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .22s; }
-.photo-card:hover .photo-preview img { transform: scale(1.025); }
+.photo-preview img, .photo-preview video { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .22s; }
+.photo-card:hover .photo-preview img, .photo-card:hover .photo-preview video { transform: scale(1.025); }
+.play-badge { position: absolute; left: 50%; top: 50%; width: 42px; height: 42px; display: grid; place-items: center; margin: -21px 0 0 -21px; border: 1px solid rgba(255,255,255,.45); border-radius: 50%; color: white; background: rgba(17,23,21,.72); box-shadow: 0 5px 18px rgba(0,0,0,.22); pointer-events: none; }
 .expand { position: absolute; right: 8px; top: 8px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; color: white; background: rgba(18,26,23,.65); opacity: 0; transition: opacity .15s; }
 .photo-card:hover .expand { opacity: 1; }
 .photo-meta { min-width: 0; min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 10px 12px; }
@@ -330,7 +332,8 @@ button { color: inherit; }
 .preview-toolbar span { margin-top: 4px; color: rgba(255,255,255,.5); font-size: 10px; }
 .preview-toolbar > div:last-child { display: flex; align-items: center; gap: 3px; }
 .preview-canvas { min-height: 0; display: grid; place-items: center; padding: 20px; overflow: auto; }
-.preview-canvas img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 50px rgba(0,0,0,.3); }
+.preview-canvas img, .preview-canvas video { display: block; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 50px rgba(0,0,0,.3); }
+.preview-canvas video { width: min(100%, 1200px); background: black; }
 
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -347,6 +350,7 @@ button { color: inherit; }
   .app-shell { display: block; }
   .sidebar { position: relative; width: 100%; height: auto; max-height: none; padding: 14px 14px 10px; }
   .brand-block { padding: 0 2px 12px; }
+  .brand-block strong { font-size: 14px; }
   .brand-mark { width: 34px; height: 34px; }
   .folder-nav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; }
   .nav-heading { flex: 0 0 auto; padding: 4px 0; }
