@@ -1,0 +1,15 @@
+<view class="viewer-page" wx:if="{{media}}">
+  <video
+    class="video-player"
+    src="{{media.url}}"
+    controls
+    show-center-play-btn
+    show-fullscreen-btn
+    enable-play-gesture
+    object-fit="contain"
+  />
+  <view class="video-copy">
+    <text class="video-name">{{media.name}}</text>
+    <text class="video-meta">{{media.dateLabel}} · {{media.sizeLabel}}</text>
+  </view>
+</view>

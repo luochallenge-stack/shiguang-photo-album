@@ -100,11 +100,15 @@ export function publicUser(user: AlbumUser): PublicAlbumUser {
   return { id, provider, accountLabel, displayName, avatarUrl, role, status, createdAt, lastLoginAt };
 }
 
-export async function createSessionCookie(request: Request, userId: string): Promise<string> {
-  const token = await createSignedToken({
+export async function createSessionToken(userId: string): Promise<string> {
+  return createSignedToken({
     userId,
     expiresAt: Date.now() + SESSION_SECONDS * 1000,
   } satisfies SessionPayload);
+}
+
+export async function createSessionCookie(request: Request, userId: string, sessionToken?: string): Promise<string> {
+  const token = sessionToken || await createSessionToken(userId);
   return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; SameSite=Lax${secureCookie(request)}`;
 }
 
@@ -121,7 +125,13 @@ export async function userFromSessionToken(token: string): Promise<AlbumUser | n
 }
 
 export async function currentUser(request: Request): Promise<AlbumUser | null> {
-  return userFromSessionToken(cookieValue(request, SESSION_COOKIE));
+  const authorization = request.headers.get("authorization") || "";
+  const bearerToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+  return userFromSessionToken(bearerToken || cookieValue(request, SESSION_COOKIE));
+}
+
+export function isMiniProgramRequest(request: Request): boolean {
+  return request.headers.get("x-album-client") === "miniprogram";
 }
 
 export function sessionCookieName(): string {

@@ -75,3 +75,29 @@ test("keeps CloudBase credentials server-side", async () => {
   assert.doesNotMatch(client, /ALBUM_SESSION_SECRET/);
   assert.doesNotMatch(auth + exampleEnv, /WECHAT_APP_SECRET|QQ_APP_KEY/);
 });
+
+test("ships a native WeChat mini program with token authentication", async () => {
+  const [projectText, app, api, login, library, viewer, auth, accessControl] = await Promise.all([
+    readFile(new URL("../miniprogram/project.config.json", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/app.json", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/utils/api.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/login/login.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/viewer/viewer.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    access(new URL("../miniprogram/images/logo.png", import.meta.url)),
+  ]);
+  const project = JSON.parse(projectText);
+  assert.equal(project.appid, "wx5c6f75fd860fb659");
+  assert.match(app, /pages\/login\/login/);
+  assert.match(app, /pages\/library\/library/);
+  assert.match(api, /x-album-client/);
+  assert.match(api, /Authorization: `Bearer/);
+  assert.match(login, /api\/auth\/session/);
+  assert.match(library, /api\/library/);
+  assert.match(library, /api\/folders\/unlock/);
+  assert.match(viewer, /<video/);
+  assert.match(auth, /authorization\.startsWith\("Bearer "\)/);
+  assert.match(accessControl, /x-album-folder-token/);
+});

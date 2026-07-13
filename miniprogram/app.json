@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/library/library",
+    "pages/viewer/viewer"
+  ],
+  "window": {
+    "backgroundColor": "#f4f6f5",
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#21483f",
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "伞兵训练营的时光集"
+  },
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

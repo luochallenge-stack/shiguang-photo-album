@@ -6,6 +6,8 @@
 
 线上地址：<https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com/>
 
+微信小程序原生客户端位于 [`miniprogram`](./miniprogram)，AppID 为 `wx5c6f75fd860fb659`。它与网页端共用账号、权限、日志、数据库和云存储；普通成员可浏览、解锁文件夹、预览图片并播放视频，管理操作继续在网页端完成。
+
 旧的云托管域名会自动跳转到上述官方 Web 安全域名，并保留文件夹和上传链接参数。
 
 CloudBase 环境：`paratrooper-battalion-d1b3b82e83`，云托管服务：`sanbing`。
@@ -52,3 +54,5 @@ tcb cloudrun deploy --port 3000
 npm run build
 npm test
 ```
+
+小程序可以直接将 `miniprogram` 目录导入微信开发者工具。服务器合法域名和发布检查见 [`miniprogram/README.md`](./miniprogram/README.md)。

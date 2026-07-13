@@ -1,0 +1,72 @@
+<view class="library-page safe-bottom">
+  <view class="member-bar">
+    <view class="identity">
+      <image class="logo" src="/images/logo.png" mode="aspectFill" />
+      <view class="identity-copy">
+        <text class="album-name">伞兵训练营的时光集</text>
+        <text class="member-name">{{user.displayName || user.accountLabel}} · {{user.role === 'admin' ? '管理员' : '成员'}}</text>
+      </view>
+    </view>
+    <button class="logout-button" bindtap="logout">退出</button>
+  </view>
+
+  <scroll-view class="folder-strip" scroll-x enhanced show-scrollbar="{{false}}">
+    <view class="folder-list">
+      <button class="folder-chip {{selectedFolder === '' ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">全部</button>
+      <button
+        wx:for="{{folders}}"
+        wx:key="id"
+        class="folder-chip {{selectedFolder === item.slug ? 'active' : ''}}"
+        data-slug="{{item.slug}}"
+        bindtap="chooseFolder"
+      >
+        {{item.name}}<text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
+      </button>
+    </view>
+  </scroll-view>
+
+  <view class="content-heading">
+    <view>
+      <text class="folder-title">{{selectedFolderName}}</text>
+      <text class="photo-count">{{photos.length}} 项影像</text>
+    </view>
+  </view>
+
+  <view class="loading" wx:if="{{loading}}">正在读取共同的时光</view>
+  <view class="error-state" wx:elif="{{error}}">
+    <text>{{error}}</text>
+    <button bindtap="retry">重新加载</button>
+  </view>
+  <view class="empty-state" wx:elif="{{photos.length === 0}}">
+    <text class="empty-title">这里还没有影像</text>
+    <text class="empty-copy">照片和视频可以在网页管理端上传。</text>
+  </view>
+  <view class="media-grid" wx:else>
+    <view class="media-item" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
+      <view class="media-preview">
+        <image wx:if="{{!item.video}}" src="{{item.url}}" mode="aspectFill" lazy-load />
+        <view wx:else class="video-placeholder">
+          <view class="play-button"><view class="play-triangle" /></view>
+          <text>视频</text>
+        </view>
+      </view>
+      <view class="media-copy">
+        <text class="media-name">{{item.name}}</text>
+        <text class="media-meta">{{item.dateLabel}} · {{item.sizeLabel}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="modal-backdrop" wx:if="{{unlockOpen}}" bindtap="closeUnlock">
+    <view class="unlock-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">受保护文件夹</text>
+      <text class="dialog-title">{{pendingFolder.name}}</text>
+      <text class="dialog-copy">输入文件夹密码后查看其中的照片和视频。</text>
+      <input class="password-input" password value="{{unlockPassword}}" bindinput="updateUnlockPassword" focus maxlength="80" />
+      <view class="dialog-actions">
+        <button class="cancel-button" bindtap="closeUnlock">取消</button>
+        <button class="unlock-button" loading="{{unlocking}}" disabled="{{unlocking || !unlockPassword}}" bindtap="unlockFolder">解锁</button>
+      </view>
+    </view>
+  </view>
+</view>

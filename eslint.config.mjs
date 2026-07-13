@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Native WeChat Mini Program files use CommonJS and are checked with node --check.
+    "miniprogram/**",
   ]),
 ]);
 

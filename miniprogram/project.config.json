@@ -1,0 +1,17 @@
+{
+  "appid": "wx5c6f75fd860fb659",
+  "compileType": "miniprogram",
+  "description": "伞兵训练营的时光集微信小程序",
+  "libVersion": "3.6.4",
+  "miniprogramRoot": "./",
+  "projectname": "sanbing-photo-album",
+  "setting": {
+    "coverView": true,
+    "es6": true,
+    "enhance": true,
+    "minified": true,
+    "postcss": true,
+    "urlCheck": true
+  },
+  "simulatorType": "wechat"
+}

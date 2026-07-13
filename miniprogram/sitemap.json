@@ -1,0 +1,9 @@
+{
+  "desc": "相册内容仅对登录成员开放",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}

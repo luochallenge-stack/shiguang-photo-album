@@ -41,3 +41,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# WeChat DevTools local settings
+/miniprogram/project.private.config.json
+/miniprogram/miniprogram_npm/

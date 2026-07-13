@@ -1,0 +1,42 @@
+<view class="login-page safe-bottom">
+  <view class="brand-area">
+    <image class="brand-logo" src="/images/logo.png" mode="aspectFill" />
+    <text class="brand-title">伞兵训练营的时光集</text>
+    <text class="brand-copy">五个人，从初中到现在。照片和视频留在这里，故事继续往前走。</text>
+    <view class="brand-rule" />
+    <text class="security-copy">所有成员需要登录，普通账号默认只有浏览权限。</text>
+  </view>
+
+  <view class="auth-area">
+    <text class="eyebrow">成员入口</text>
+    <text class="auth-title">{{mode === 'login' ? '登录相册' : '创建账号'}}</text>
+    <text class="auth-copy">{{mode === 'login' ? '使用相册账号继续浏览共同的时光。' : '注册成功后即可浏览，管理权限由管理员单独授权。'}}</text>
+
+    <view class="mode-switch">
+      <button class="mode-button {{mode === 'login' ? 'active' : ''}}" data-mode="login" bindtap="switchMode">登录</button>
+      <button class="mode-button {{mode === 'register' ? 'active' : ''}}" data-mode="register" bindtap="switchMode">注册</button>
+    </view>
+
+    <view class="field" wx:if="{{mode === 'register'}}">
+      <text>昵称</text>
+      <input value="{{displayName}}" data-field="displayName" bindinput="updateField" maxlength="20" />
+    </view>
+    <view class="field">
+      <text>用户名</text>
+      <input value="{{username}}" data-field="username" bindinput="updateField" maxlength="24" />
+    </view>
+    <view class="field">
+      <text>密码</text>
+      <input value="{{password}}" data-field="password" bindinput="updateField" password maxlength="72" />
+    </view>
+    <view class="field" wx:if="{{mode === 'register'}}">
+      <text>确认密码</text>
+      <input value="{{confirmPassword}}" data-field="confirmPassword" bindinput="updateField" password maxlength="72" />
+    </view>
+
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+    <button class="submit-button" loading="{{loading}}" disabled="{{loading}}" bindtap="submit">
+      {{mode === 'login' ? '登录' : '注册并进入'}}
+    </button>
+  </view>
+</view>

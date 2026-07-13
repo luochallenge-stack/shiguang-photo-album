@@ -1,4 +1,10 @@
-import { createSessionCookie, publicUser, registerLocalUser } from "../../../../lib/auth";
+import {
+  createSessionCookie,
+  createSessionToken,
+  isMiniProgramRequest,
+  publicUser,
+  registerLocalUser,
+} from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
 export async function POST(request: Request) {
@@ -8,15 +14,19 @@ export async function POST(request: Request) {
     const password = typeof body.password === "string" ? body.password : "";
     const displayName = typeof body.displayName === "string" ? body.displayName : "";
     const user = await registerLocalUser(username, password, displayName);
+    const sessionToken = await createSessionToken(user.id);
     await recordAudit(request, user, {
       action: "auth.register",
       resourceType: "user",
       resourceId: user.id,
       resourceName: user.displayName,
     });
-    return Response.json({ user: publicUser(user) }, {
+    return Response.json({
+      user: publicUser(user),
+      ...(isMiniProgramRequest(request) ? { sessionToken } : {}),
+    }, {
       status: 201,
-      headers: { "set-cookie": await createSessionCookie(request, user.id) },
+      headers: { "set-cookie": await createSessionCookie(request, user.id, sessionToken) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "注册失败";

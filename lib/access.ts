@@ -114,14 +114,18 @@ export async function readMediaUploadTicket(ticket: string): Promise<MediaUpload
   }
 }
 
-export async function createFolderAccessCookie(folder: AlbumFolder): Promise<string> {
+export async function createFolderAccessToken(folder: AlbumFolder): Promise<string> {
   if (!folder.passwordHash) throw new Error("这个文件夹没有设置密码");
   const payload = toBase64Url(JSON.stringify({
     slug: folder.slug,
     version: await lockVersion(folder.passwordHash),
     expiresAt: Date.now() + FOLDER_ACCESS_SECONDS * 1000,
   }));
-  const token = `${payload}.${await sign(payload)}`;
+  return `${payload}.${await sign(payload)}`;
+}
+
+export async function createFolderAccessCookie(folder: AlbumFolder, accessToken?: string): Promise<string> {
+  const token = accessToken || await createFolderAccessToken(folder);
   const name = await folderCookieName(folder.slug);
   return `${name}=${token}; Path=/; Max-Age=${FOLDER_ACCESS_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
 }
@@ -137,7 +141,8 @@ function readCookie(request: Request, name: string): string {
 
 export async function canReadFolder(request: Request, folder: AlbumFolder, user?: AlbumUser | null): Promise<boolean> {
   if (!folder.passwordHash || user?.role === "admin") return true;
-  const token = readCookie(request, await folderCookieName(folder.slug));
+  const token = request.headers.get("x-album-folder-token")?.trim()
+    || readCookie(request, await folderCookieName(folder.slug));
   const [payload, signature] = token.split(".");
   if (!payload || !signature || !constantEqual(signature, await sign(payload))) return false;
   try {

@@ -1,6 +1,6 @@
-import { createFolderAccessCookie, verifyFolderPassword } from "../../../../lib/access";
+import { createFolderAccessCookie, createFolderAccessToken, verifyFolderPassword } from "../../../../lib/access";
 import { findFolder } from "../../../../lib/cloudbase";
-import { currentUser, unauthenticated } from "../../../../lib/auth";
+import { currentUser, isMiniProgramRequest, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
 type Attempt = { count: number; resetAt: number };
@@ -45,6 +45,7 @@ export async function POST(request: Request) {
     }
 
     attempts.delete(key);
+    const accessToken = await createFolderAccessToken(folder);
     await recordAudit(request, user, {
       action: "folder.unlock",
       resourceType: "folder",
@@ -52,8 +53,11 @@ export async function POST(request: Request) {
       resourceName: folder.name,
       metadata: { folderSlug },
     });
-    return Response.json({ ok: true }, {
-      headers: { "set-cookie": await createFolderAccessCookie(folder) },
+    return Response.json({
+      ok: true,
+      ...(isMiniProgramRequest(request) ? { accessToken } : {}),
+    }, {
+      headers: { "set-cookie": await createFolderAccessCookie(folder, accessToken) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "解锁文件夹失败";

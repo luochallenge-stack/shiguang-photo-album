@@ -1,0 +1,42 @@
+.library-page { min-height: 100vh; padding-bottom: 48rpx; }
+.member-bar { display: flex; align-items: center; justify-content: space-between; gap: 22rpx; padding: 28rpx 28rpx 24rpx; color: #ffffff; background: #21483f; }
+.identity { min-width: 0; display: flex; align-items: center; gap: 18rpx; }
+.logo { width: 72rpx; height: 72rpx; flex: 0 0 auto; border-radius: 12rpx; }
+.identity-copy { min-width: 0; }
+.album-name, .member-name, .folder-title, .photo-count, .media-name, .media-meta, .empty-title, .empty-copy, .dialog-eyebrow, .dialog-title, .dialog-copy { display: block; }
+.album-name { overflow: hidden; font-size: 28rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.member-name { margin-top: 8rpx; color: rgba(255,255,255,.62); font-size: 21rpx; }
+.logout-button { width: 92rpx; height: 56rpx; flex: 0 0 auto; margin: 0; padding: 0; border: 1rpx solid rgba(255,255,255,.28); border-radius: 10rpx; color: #ffffff; background: transparent; font-size: 22rpx; line-height: 56rpx; }
+.folder-strip { width: 100%; border-bottom: 1rpx solid #e1e7e4; background: #ffffff; white-space: nowrap; }
+.folder-list { display: inline-flex; gap: 14rpx; padding: 22rpx 28rpx; }
+.folder-chip { width: auto; height: 62rpx; display: inline-flex; align-items: center; gap: 9rpx; margin: 0; padding: 0 24rpx; border: 1rpx solid #d7dfdc; border-radius: 8rpx; color: #53625d; background: #ffffff; font-size: 23rpx; line-height: 62rpx; }
+.folder-chip.active { border-color: #21483f; color: #ffffff; background: #21483f; }
+.locked-mark { padding: 2rpx 8rpx; border-radius: 5rpx; color: #775c19; background: #fff0b8; font-size: 17rpx; line-height: 28rpx; }
+.content-heading { display: flex; align-items: flex-end; justify-content: space-between; padding: 32rpx 28rpx 20rpx; }
+.folder-title { font-size: 34rpx; font-weight: 700; }
+.photo-count { margin-top: 8rpx; color: #7b8783; font-size: 21rpx; }
+.media-grid { display: flex; flex-wrap: wrap; gap: 18rpx; padding: 0 28rpx; }
+.media-item { width: calc((100% - 18rpx) / 2); min-width: 0; overflow: hidden; border: 1rpx solid #dfe5e2; border-radius: 12rpx; background: #ffffff; box-sizing: border-box; }
+.media-preview { position: relative; width: 100%; height: 328rpx; overflow: hidden; background: #e9eeec; }
+.media-preview image { width: 100%; height: 100%; display: block; }
+.video-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16rpx; color: #5d6d67; background: #dfe9e6; font-size: 21rpx; }
+.play-button { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: #ffffff; background: #21483f; }
+.play-triangle { width: 0; height: 0; margin-left: 6rpx; border-top: 12rpx solid transparent; border-bottom: 12rpx solid transparent; border-left: 18rpx solid #ffffff; }
+.media-copy { padding: 18rpx; }
+.media-name { overflow: hidden; font-size: 24rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.media-meta { margin-top: 9rpx; overflow: hidden; color: #83908c; font-size: 19rpx; text-overflow: ellipsis; white-space: nowrap; }
+.loading, .empty-state, .error-state { min-height: 460rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40rpx; color: #7a8883; font-size: 24rpx; text-align: center; }
+.empty-title { color: #31413c; font-size: 29rpx; font-weight: 700; }
+.empty-copy { margin-top: 14rpx; line-height: 1.6; }
+.error-state button { height: 66rpx; margin-top: 24rpx; padding: 0 28rpx; border-radius: 8rpx; color: #ffffff; background: #21483f; font-size: 22rpx; line-height: 66rpx; }
+.modal-backdrop { position: fixed; z-index: 20; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-end; background: rgba(13,25,21,.52); }
+.unlock-dialog { width: 100%; padding: 38rpx 36rpx calc(34rpx + env(safe-area-inset-bottom)); border-radius: 18rpx 18rpx 0 0; background: #ffffff; }
+.dialog-eyebrow { color: #b85246; font-size: 21rpx; font-weight: 700; }
+.dialog-title { margin-top: 12rpx; font-size: 35rpx; font-weight: 700; }
+.dialog-copy { margin-top: 12rpx; color: #74827e; font-size: 23rpx; line-height: 1.55; }
+.password-input { height: 82rpx; margin-top: 28rpx; padding: 0 22rpx; border: 1rpx solid #cbd6d2; border-radius: 10rpx; font-size: 28rpx; }
+.dialog-actions { display: flex; gap: 16rpx; margin-top: 24rpx; }
+.dialog-actions button { height: 78rpx; margin: 0; border-radius: 10rpx; font-size: 24rpx; font-weight: 700; line-height: 78rpx; }
+.cancel-button { width: 38%; color: #53625d; background: #edf1ef; }
+.unlock-button { width: 62%; color: #ffffff; background: #21483f; }
+.unlock-button[disabled] { color: rgba(255,255,255,.7); background: #6f8982; }
