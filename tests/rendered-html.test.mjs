@@ -157,12 +157,16 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(login, /api\/auth\/session/);
   assert.match(library, /api\/library/);
   assert.match(library, /api\/folders\/unlock/);
+  assert.match(library, /api\.request\("\/api\/folders"/);
+  assert.match(library, /createFolder/);
   assert.match(library, /wx\.chooseMedia/);
-  assert.match(library, /api\.uploadImage/);
+  assert.match(library, /mediaType: \["image", "video"\]/);
+  assert.match(library, /MAX_VIDEO_BYTES = 500/);
+  assert.match(library, /api\.uploadMedia/);
   assert.match(library, /onReachBottom/);
   assert.match(library, /MAX_UPLOAD_COUNT = 50/);
   assert.match(library, /PICKER_BATCH_SIZE = 9/);
-  assert.match(library, /uploadSelectedImages/);
+  assert.match(library, /uploadSelectedMedia/);
   assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
   assert.match(viewerLogic, /api\/photos\/url/);

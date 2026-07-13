@@ -2,6 +2,8 @@ const api = require("../../utils/api");
 
 const PAGE_SIZE = 24;
 const COMPRESS_THRESHOLD = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_UPLOAD_COUNT = 50;
 const PICKER_BATCH_SIZE = 9;
 const MAX_BATCH_ACTION_COUNT = 100;
@@ -36,17 +38,24 @@ function operationLabel(photo) {
   return `${photo.lastActionBy} ${labels[photo.lastAction] || "操作"}`;
 }
 
-function uploadName(path, index) {
+function isVideoFile(file) {
+  if (file && file.fileType === "video") return true;
+  return /\.(mp4|mov|m4v|webm|mpeg|mpg)(?:\?|$)/i.test(String(file && file.tempFilePath || ""));
+}
+
+function uploadName(file, index) {
+  const path = file && file.tempFilePath;
   const extensionMatch = String(path || "").match(/\.([a-zA-Z0-9]{2,5})(?:\?|$)/);
-  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : "jpg";
+  const video = isVideoFile(file);
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : video ? "mp4" : "jpg";
   const date = new Date();
   const pad = (part) => String(part).padStart(2, "0");
   const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
-  return `照片-${stamp}-${index + 1}.${extension}`;
+  return `${video ? "视频" : "照片"}-${stamp}-${index + 1}.${extension}`;
 }
 
 function compressIfNeeded(file) {
-  if (!file || !file.tempFilePath || file.size <= COMPRESS_THRESHOLD) {
+  if (!file || !file.tempFilePath || isVideoFile(file) || file.size <= COMPRESS_THRESHOLD) {
     return Promise.resolve(file.tempFilePath);
   }
   return new Promise((resolve, reject) => {
@@ -57,6 +66,23 @@ function compressIfNeeded(file) {
       fail: (error) => reject(new Error(error.errMsg || "压缩图片失败")),
     });
   });
+}
+
+function uploadSizeError(file) {
+  const size = Number(file && file.size) || 0;
+  if (!size) return "";
+  if (isVideoFile(file) && size > MAX_VIDEO_BYTES) return "视频不能超过 500 MB";
+  if (!isVideoFile(file) && size > MAX_IMAGE_BYTES) return "图片不能超过 50 MB";
+  return "";
+}
+
+function selectionCounts(files) {
+  const videoCount = files.filter(isVideoFile).length;
+  return {
+    selectedCount: files.length,
+    selectedImageCount: files.length - videoCount,
+    selectedVideoCount: videoCount,
+  };
 }
 
 Page({
@@ -81,8 +107,13 @@ Page({
     uploadProgress: 0,
     uploadLabel: "",
     selectionOpen: false,
-    selectingImages: false,
+    selectingMedia: false,
     selectedCount: 0,
+    selectedImageCount: 0,
+    selectedVideoCount: 0,
+    createFolderOpen: false,
+    newFolderName: "",
+    creatingFolder: false,
     editMode: false,
     batchSelectedCount: 0,
     allLoadedSelected: false,
@@ -208,6 +239,45 @@ Page({
     if (this.data.user.role !== "admin") return;
     this.exitEditMode();
     this.loadLibrary("", false, false, true);
+  },
+
+  openCreateFolder() {
+    if (this.data.user.role !== "admin" || this.data.creatingFolder) return;
+    this.exitEditMode();
+    this.setData({ createFolderOpen: true, newFolderName: "" });
+  },
+
+  closeCreateFolder() {
+    if (this.data.creatingFolder) return;
+    this.setData({ createFolderOpen: false, newFolderName: "" });
+  },
+
+  updateNewFolderName(event) {
+    this.setData({ newFolderName: event.detail.value });
+  },
+
+  async createFolder() {
+    const name = String(this.data.newFolderName || "").trim();
+    if (!name || this.data.creatingFolder) return;
+    this.setData({ creatingFolder: true });
+    try {
+      const result = await api.request("/api/folders", {
+        method: "POST",
+        data: { name },
+      });
+      if (!result.folder || !result.folder.slug) throw new Error("服务器没有返回新文件夹");
+      this.setData({ createFolderOpen: false, newFolderName: "", creatingFolder: false });
+      wx.showToast({ title: "文件夹已创建", icon: "success" });
+      this.loadLibrary(result.folder.slug, true, false, false);
+    } catch (error) {
+      this.setData({ creatingFolder: false });
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "创建文件夹失败", icon: "none" });
+    }
   },
 
   openUnlock(folder) {
@@ -472,7 +542,7 @@ Page({
     }
   },
 
-  chooseImages() {
+  chooseMedia() {
     if (this.data.user.role !== "admin") return;
     if (!this.data.selectedFolder) {
       wx.showToast({ title: "请先选择目标文件夹", icon: "none" });
@@ -480,55 +550,73 @@ Page({
     }
     if (this.data.uploading) return;
     pendingUploadFiles = [];
-    this.setData({ selectionOpen: true, selectedCount: 0 }, () => this.addMoreImages());
+    this.setData({
+      selectionOpen: true,
+      selectedCount: 0,
+      selectedImageCount: 0,
+      selectedVideoCount: 0,
+    }, () => this.addMoreMedia());
   },
 
-  addMoreImages() {
-    if (this.data.uploading || this.data.selectingImages) return;
+  addMoreMedia() {
+    if (this.data.uploading || this.data.selectingMedia) return;
     const remaining = MAX_UPLOAD_COUNT - pendingUploadFiles.length;
     if (remaining <= 0) {
-      wx.showToast({ title: "本次已选满 50 张", icon: "none" });
+      wx.showToast({ title: "本次已选满 50 项", icon: "none" });
       return;
     }
-    this.setData({ selectingImages: true });
+    this.setData({ selectingMedia: true });
     wx.chooseMedia({
       count: Math.min(PICKER_BATCH_SIZE, remaining),
-      mediaType: ["image"],
+      mediaType: ["image", "video"],
       sourceType: ["album", "camera"],
       success: ({ tempFiles }) => {
         const selected = (tempFiles || []).slice(0, remaining);
-        pendingUploadFiles = pendingUploadFiles.concat(selected);
-        this.setData({ selectedCount: pendingUploadFiles.length });
+        const accepted = selected.filter((file) => !uploadSizeError(file));
+        const rejected = selected.length - accepted.length;
+        pendingUploadFiles = pendingUploadFiles.concat(accepted);
+        this.setData(selectionCounts(pendingUploadFiles));
+        if (rejected) wx.showToast({ title: `已跳过 ${rejected} 个超限文件`, icon: "none" });
       },
-      complete: () => this.setData({ selectingImages: false }),
+      complete: () => this.setData({ selectingMedia: false }),
     });
   },
 
-  cancelImageSelection() {
-    if (this.data.selectingImages) return;
+  cancelMediaSelection() {
+    if (this.data.selectingMedia) return;
     pendingUploadFiles = [];
-    this.setData({ selectionOpen: false, selectedCount: 0 });
+    this.setData({
+      selectionOpen: false,
+      selectedCount: 0,
+      selectedImageCount: 0,
+      selectedVideoCount: 0,
+    });
   },
 
-  uploadSelectedImages() {
-    if (!pendingUploadFiles.length || this.data.selectingImages) return;
+  uploadSelectedMedia() {
+    if (!pendingUploadFiles.length || this.data.selectingMedia) return;
     const files = pendingUploadFiles.slice(0, MAX_UPLOAD_COUNT);
     pendingUploadFiles = [];
-    this.setData({ selectionOpen: false, selectedCount: 0 }, () => this.uploadImages(files));
+    this.setData({
+      selectionOpen: false,
+      selectedCount: 0,
+      selectedImageCount: 0,
+      selectedVideoCount: 0,
+    }, () => this.uploadMedia(files));
   },
 
-  async uploadImages(files) {
+  async uploadMedia(files) {
     if (!files.length || this.data.uploading) return;
     this.setData({ uploading: true, uploadProgress: 0, uploadLabel: `准备上传 1/${files.length}` });
     let completed = 0;
     try {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
-        this.setData({ uploadLabel: `正在上传 ${index + 1}/${files.length}` });
+        this.setData({ uploadLabel: `正在上传${isVideoFile(file) ? "视频" : "照片"} ${index + 1}/${files.length}` });
         const filePath = await compressIfNeeded(file);
-        await api.uploadImage(filePath, {
+        await api.uploadMedia(filePath, {
           folderSlug: this.data.selectedFolder,
-          name: uploadName(filePath, index),
+          name: uploadName(file, index),
           width: String(file.width || ""),
           height: String(file.height || ""),
         }, ({ progress }) => {
@@ -537,7 +625,7 @@ Page({
         });
         completed += 1;
       }
-      wx.showToast({ title: `已上传 ${completed} 张`, icon: "success" });
+      wx.showToast({ title: `已上传 ${completed} 项`, icon: "success" });
       this.loadLibrary(this.data.selectedFolder, true);
     } catch (error) {
       if (error.statusCode === 401) {

@@ -12,6 +12,8 @@
 .folder-list { display: inline-flex; gap: 14rpx; padding: 22rpx 28rpx; }
 .folder-chip { width: auto; height: 62rpx; display: inline-flex; align-items: center; gap: 9rpx; margin: 0; padding: 0 24rpx; border: 1rpx solid #d7dfdc; border-radius: 8rpx; color: #53625d; background: #ffffff; font-size: 23rpx; line-height: 62rpx; }
 .folder-chip.active { border-color: #21483f; color: #ffffff; background: #21483f; }
+.create-folder-chip { border-style: dashed; color: #21483f; background: #f4f8f6; }
+.create-folder-chip[disabled] { color: #9ba6a2; background: #edf1ef; }
 .locked-mark { padding: 2rpx 8rpx; border-radius: 5rpx; color: #775c19; background: #fff0b8; font-size: 17rpx; line-height: 28rpx; }
 .content-heading { display: flex; align-items: flex-end; justify-content: space-between; padding: 32rpx 28rpx 20rpx; }
 .folder-title { font-size: 34rpx; font-weight: 700; }
@@ -62,7 +64,7 @@
 .dialog-eyebrow { color: #b85246; font-size: 21rpx; font-weight: 700; }
 .dialog-title { margin-top: 12rpx; font-size: 35rpx; font-weight: 700; }
 .dialog-copy { margin-top: 12rpx; color: #74827e; font-size: 23rpx; line-height: 1.55; }
-.password-input { height: 82rpx; margin-top: 28rpx; padding: 0 22rpx; border: 1rpx solid #cbd6d2; border-radius: 10rpx; font-size: 28rpx; }
+.password-input, .folder-name-input { height: 82rpx; margin-top: 28rpx; padding: 0 22rpx; border: 1rpx solid #cbd6d2; border-radius: 10rpx; font-size: 28rpx; }
 .dialog-actions { display: flex; gap: 16rpx; margin-top: 24rpx; }
 .dialog-actions button { height: 78rpx; margin: 0; border-radius: 10rpx; font-size: 24rpx; font-weight: 700; line-height: 78rpx; }
 .cancel-button { width: 38%; color: #53625d; background: #edf1ef; }

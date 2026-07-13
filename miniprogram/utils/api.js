@@ -55,7 +55,7 @@ function request(path, options = {}) {
   });
 }
 
-function uploadImage(filePath, formData, onProgress) {
+function uploadMedia(filePath, formData, onProgress) {
   const token = getSessionToken();
   return new Promise((resolve, reject) => {
     const task = wx.uploadFile({
@@ -67,7 +67,7 @@ function uploadImage(filePath, formData, onProgress) {
         "x-album-client": "miniprogram",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      timeout: 120000,
+      timeout: 600000,
       success(response) {
         let payload = {};
         try {
@@ -108,5 +108,5 @@ module.exports = {
   getSessionToken,
   request,
   saveSession,
-  uploadImage,
+  uploadMedia,
 };

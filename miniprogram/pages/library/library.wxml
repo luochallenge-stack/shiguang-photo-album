@@ -22,6 +22,7 @@
       >
         {{item.name}}<text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
       </button>
+      <button wx:if="{{user.role === 'admin'}}" class="folder-chip create-folder-chip" bindtap="openCreateFolder" disabled="{{creatingFolder}}">＋ 新建</button>
       <button wx:if="{{user.role === 'admin'}}" class="folder-chip recycle-chip {{recycleMode ? 'active' : ''}}" bindtap="chooseRecycleBin">回收站 {{recycleCount}}</button>
     </view>
   </scroll-view>
@@ -33,7 +34,7 @@
     </view>
     <view wx:if="{{user.role === 'admin'}}" class="heading-actions">
       <button class="edit-button {{editMode ? 'active' : ''}}" bindtap="toggleEditMode" disabled="{{uploading || batchSaving || photos.length === 0}}">{{editMode ? '完成' : '编辑'}}</button>
-      <button wx:if="{{!editMode && !recycleMode}}" class="upload-button" bindtap="chooseImages" disabled="{{uploading}}">＋ 上传</button>
+      <button wx:if="{{!editMode && !recycleMode}}" class="upload-button" bindtap="chooseMedia" disabled="{{uploading}}">＋ 上传</button>
     </view>
   </view>
 
@@ -52,7 +53,7 @@
   </view>
   <view class="empty-state" wx:elif="{{photos.length === 0}}">
     <text class="empty-title">{{recycleMode ? '回收站是空的' : '这里还没有影像'}}</text>
-    <text class="empty-copy">{{recycleMode ? '删除的影像会在这里保留 7 天。' : user.role === 'admin' ? '点击上传，添加第一张照片。' : '管理员上传后，这里就会出现新的影像。'}}</text>
+    <text class="empty-copy">{{recycleMode ? '删除的影像会在这里保留 7 天。' : user.role === 'admin' ? '点击上传，添加第一张照片或视频。' : '管理员上传后，这里就会出现新的影像。'}}</text>
   </view>
   <view class="media-grid" wx:else>
     <view class="media-item {{item.selected ? 'selected' : ''}}" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
@@ -103,25 +104,47 @@
     </view>
   </view>
 
+  <view class="selection-backdrop" wx:if="{{createFolderOpen}}" bindtap="closeCreateFolder">
+    <view class="selection-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">新建文件夹</text>
+      <text class="dialog-title">整理新的回忆</text>
+      <text class="dialog-copy">创建后会直接进入这个文件夹，可以继续上传照片或视频。</text>
+      <input
+        class="folder-name-input"
+        value="{{newFolderName}}"
+        bindinput="updateNewFolderName"
+        bindconfirm="createFolder"
+        confirm-type="done"
+        focus="{{createFolderOpen}}"
+        maxlength="80"
+        placeholder="例如：2026 青岛旅行"
+      />
+      <view class="dialog-actions">
+        <button class="cancel-button" bindtap="closeCreateFolder" disabled="{{creatingFolder}}">取消</button>
+        <button class="unlock-button" bindtap="createFolder" disabled="{{creatingFolder || !newFolderName}}" loading="{{creatingFolder}}">创建</button>
+      </view>
+    </view>
+  </view>
+
   <view class="selection-backdrop" wx:if="{{selectionOpen}}">
     <view class="selection-dialog" catchtap="noop">
       <text class="dialog-eyebrow">批量上传</text>
-      <text class="dialog-title">已选择 {{selectedCount}} / 50 张</text>
-      <text class="dialog-copy">每轮最多添加 9 张，可以连续添加多轮，再作为一个上传任务统一处理。</text>
+      <text class="dialog-title">已选择 {{selectedCount}} / 50 项</text>
+      <text class="dialog-copy">{{selectedImageCount}} 张照片 · {{selectedVideoCount}} 个视频。每轮最多添加 9 项，可以连续添加多轮。</text>
       <view class="selection-actions">
         <button
           class="selection-more"
-          bindtap="addMoreImages"
-          loading="{{selectingImages}}"
-          disabled="{{selectingImages || selectedCount >= 50}}"
+          bindtap="addMoreMedia"
+          loading="{{selectingMedia}}"
+          disabled="{{selectingMedia || selectedCount >= 50}}"
         >继续添加</button>
         <button
           class="selection-upload"
-          bindtap="uploadSelectedImages"
-          disabled="{{selectingImages || !selectedCount}}"
-        >上传 {{selectedCount}} 张</button>
+          bindtap="uploadSelectedMedia"
+          disabled="{{selectingMedia || !selectedCount}}"
+        >上传 {{selectedCount}} 项</button>
       </view>
-      <button class="selection-cancel" bindtap="cancelImageSelection" disabled="{{selectingImages}}">取消本次选择</button>
+      <button class="selection-cancel" bindtap="cancelMediaSelection" disabled="{{selectingMedia}}">取消本次选择</button>
     </view>
   </view>
 
