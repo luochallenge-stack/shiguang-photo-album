@@ -87,7 +87,24 @@ button { color: inherit; }
 .folder-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .folder-row b { font-size: 11px; font-weight: 700; opacity: .7; }
 
-.storage-meter { margin-top: auto; padding: 15px 10px 4px; border-top: 1px solid rgba(255,255,255,.12); }
+.admin-access {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: auto;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 6px;
+  color: rgba(255,255,255,.72);
+  background: rgba(255,255,255,.05);
+  cursor: pointer;
+  text-align: left;
+}
+.admin-access:hover { color: white; background: rgba(255,255,255,.1); }
+.admin-access.active { color: #163f36; border-color: var(--mint); background: var(--mint); }
+.admin-access span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 700; }
+.storage-meter { margin-top: 9px; padding: 15px 10px 4px; border-top: 1px solid rgba(255,255,255,.12); }
 .storage-line { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
 .storage-line span { display: flex; align-items: center; gap: 7px; }
 .storage-line i { width: 7px; height: 7px; border-radius: 50%; }
@@ -171,7 +188,7 @@ button { color: inherit; }
 .icon-button.dark:hover { color: white; border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.1); }
 
 .content { padding: 26px 28px 44px; }
-.notice, .error-banner {
+.notice, .share-notice, .error-banner {
   min-height: 44px;
   display: flex;
   align-items: center;
@@ -183,6 +200,7 @@ button { color: inherit; }
 }
 .notice { border: 1px solid #d7bd72; color: #554514; background: #fff7da; }
 .notice strong { margin-right: 5px; }
+.share-notice { border: 1px solid #afd7c8; color: #1e594b; background: #eaf7f2; }
 .error-banner { justify-content: space-between; border: 1px solid #ecc8c4; color: var(--danger); background: #fff0ee; }
 .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
 .section-heading h1 { margin: 0; font-size: 25px; line-height: 1.2; }
@@ -294,6 +312,7 @@ button { color: inherit; }
   .nav-heading > span { display: none; }
   .folder-row { width: auto; min-width: max-content; grid-template-columns: 18px auto auto; margin: 0; padding: 7px 10px; }
   .storage-meter { display: none; }
+  .admin-access { min-width: max-content; margin: 0 0 0 auto; }
   .topbar { position: sticky; min-height: 58px; padding: 9px 12px; }
   .breadcrumb { display: none; }
   .top-actions { width: 100%; }

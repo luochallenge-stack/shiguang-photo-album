@@ -13,10 +13,13 @@ import {
   Images,
   LayoutList,
   Link2,
+  KeyRound,
   LoaderCircle,
   Maximize2,
   Plus,
   Search,
+  Share2,
+  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
@@ -155,7 +158,32 @@ export default function Home() {
   const [preview, setPreview] = useState<PhotoItem | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [copied, setCopied] = useState(false);
+  const [copiedUpload, setCopiedUpload] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminInput, setAdminInput] = useState("");
+  const [adminKey, setAdminKey] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [verifyingAdmin, setVerifyingAdmin] = useState(false);
+  const [sharedFolder, setSharedFolder] = useState("");
+  const [sharedUploadToken, setSharedUploadToken] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const adminHeaders = (contentType = false): Record<string, string> => ({
+    ...(contentType ? { "content-type": "application/json" } : {}),
+    ...(adminKey ? { "x-album-admin-key": adminKey } : {}),
+  });
+
+  const verifyAdminKey = async (candidate: string, remember = true) => {
+    await readJson<{ ok: boolean }>(
+      await fetch("/api/admin/verify", {
+        method: "POST",
+        headers: { "x-album-admin-key": candidate },
+      }),
+    );
+    setAdminKey(candidate);
+    setIsAdmin(true);
+    if (remember) sessionStorage.setItem("album-admin-key", candidate);
+  };
 
   const loadLibrary = useCallback(async (folder = selectedFolder) => {
     setLoading(true);
@@ -174,8 +202,18 @@ export default function Home() {
   }, [selectedFolder]);
 
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("folder") || "";
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("folder") || "";
+    const uploadToken = params.get("upload") || "";
     if (fromUrl) setSelectedFolder(fromUrl);
+    if (fromUrl && uploadToken) {
+      setSharedFolder(fromUrl);
+      setSharedUploadToken(uploadToken);
+    }
+    const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
+    if (savedAdminKey) {
+      void verifyAdminKey(savedAdminKey, false).catch(() => sessionStorage.removeItem("album-admin-key"));
+    }
     void loadLibrary(fromUrl);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -186,6 +224,9 @@ export default function Home() {
     if (!query) return photos;
     return photos.filter((photo) => photo.name.toLocaleLowerCase().includes(query));
   }, [photos, search]);
+  const canUpload = Boolean(
+    selectedFolder && (isAdmin || (sharedUploadToken && sharedFolder === selectedFolder)),
+  );
 
   const chooseFolder = (slug: string) => {
     setSelectedFolder(slug);
@@ -204,7 +245,7 @@ export default function Home() {
       const result = await readJson<{ folder: FolderItem }>(
         await fetch("/api/folders", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: adminHeaders(true),
           body: JSON.stringify({ name: newFolderName }),
         }),
       );
@@ -230,6 +271,10 @@ export default function Home() {
       setError("请先选择或新建一个文件夹");
       return;
     }
+    if (!canUpload) {
+      setError("这个链接没有上传权限，请使用管理口令或文件夹上传链接");
+      return;
+    }
     if (!storageConfigured) {
       setError("七牛存储尚未配置，暂时不能上传");
       return;
@@ -252,11 +297,12 @@ export default function Home() {
         }>(
           await fetch("/api/upload-token", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: adminHeaders(true),
             body: JSON.stringify({
               folderSlug: selectedFolder,
               filename: file.name,
               mimeType,
+              uploadToken: isAdmin ? undefined : sharedUploadToken,
             }),
           }),
         );
@@ -271,7 +317,7 @@ export default function Home() {
         await readJson<{ photo: PhotoItem }>(
           await fetch("/api/photos", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: adminHeaders(true),
             body: JSON.stringify({
               folderSlug: selectedFolder,
               objectKey: signed.objectKey,
@@ -279,6 +325,7 @@ export default function Home() {
               url: signed.publicUrl,
               size: file.size,
               mimeType,
+              uploadToken: isAdmin ? undefined : sharedUploadToken,
               ...dimensions,
             }),
           }),
@@ -314,6 +361,50 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const copyUploadLink = async () => {
+    if (!selectedFolder || !isAdmin) return;
+    setError("");
+    try {
+      const result = await readJson<{ uploadToken: string }>(
+        await fetch("/api/folders/share", {
+          method: "POST",
+          headers: adminHeaders(true),
+          body: JSON.stringify({ folderSlug: selectedFolder }),
+        }),
+      );
+      const url = new URL(window.location.href);
+      url.searchParams.set("folder", selectedFolder);
+      url.searchParams.set("upload", result.uploadToken);
+      await navigator.clipboard.writeText(url.toString());
+      setCopiedUpload(true);
+      window.setTimeout(() => setCopiedUpload(false), 1800);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "生成上传链接失败");
+    }
+  };
+
+  const unlockAdmin = async () => {
+    const candidate = adminInput.trim();
+    if (!candidate) return;
+    setVerifyingAdmin(true);
+    setError("");
+    try {
+      await verifyAdminKey(candidate);
+      setAdminInput("");
+      setAdminOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "管理口令错误");
+    } finally {
+      setVerifyingAdmin(false);
+    }
+  };
+
+  const lockAdmin = () => {
+    sessionStorage.removeItem("album-admin-key");
+    setAdminKey("");
+    setIsAdmin(false);
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -328,9 +419,11 @@ export default function Home() {
         <nav className="folder-nav" aria-label="相册文件夹">
           <div className="nav-heading">
             <span>文件夹</span>
-            <button className="icon-button inverse" onClick={() => setNewFolderOpen(true)} title="新建文件夹" aria-label="新建文件夹">
-              <Plus size={17} />
-            </button>
+            {isAdmin && (
+              <button className="icon-button inverse" onClick={() => setNewFolderOpen(true)} title="新建文件夹" aria-label="新建文件夹">
+                <Plus size={17} />
+              </button>
+            )}
           </div>
           <button className={`folder-row ${selectedFolder ? "" : "active"}`} onClick={() => chooseFolder("")}>
             <Images size={18} />
@@ -349,6 +442,11 @@ export default function Home() {
             </button>
           ))}
         </nav>
+
+        <button className={`admin-access ${isAdmin ? "active" : ""}`} onClick={() => isAdmin ? lockAdmin() : setAdminOpen(true)}>
+          {isAdmin ? <ShieldCheck size={16} /> : <KeyRound size={16} />}
+          <span>{isAdmin ? "管理模式已开启" : "管理相册"}</span>
+        </button>
 
         <div className="storage-meter">
           <div className="storage-line">
@@ -377,7 +475,13 @@ export default function Home() {
                 {copied ? "已复制" : "文件夹链接"}
               </button>
             )}
-            <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!selectedFolder}>
+            {selectedFolder && isAdmin && (
+              <button className="secondary-button" onClick={() => void copyUploadLink()}>
+                {copiedUpload ? <Check size={17} /> : <Share2 size={17} />}
+                {copiedUpload ? "已复制" : "上传链接"}
+              </button>
+            )}
+            <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片" : "需要上传权限"}>
               <Upload size={18} /> 上传照片
             </button>
             <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={onFileChange} />
@@ -389,6 +493,12 @@ export default function Home() {
             <div className="notice" role="status">
               <HardDrive size={18} />
               <span><strong>等待接入七牛存储</strong> 配置完成后即可在线上传与查看原图。</span>
+            </div>
+          )}
+          {sharedUploadToken && sharedFolder === selectedFolder && !isAdmin && (
+            <div className="share-notice" role="status">
+              <Share2 size={17} />
+              <span>你可以向「{activeFolder?.name || "当前文件夹"}」上传照片</span>
             </div>
           )}
           {error && (
@@ -409,7 +519,7 @@ export default function Home() {
             </div>
           </div>
 
-          {selectedFolder && (
+          {canUpload && (
             <div
               className={`drop-zone ${dragging ? "dragging" : ""}`}
               onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
@@ -455,10 +565,12 @@ export default function Home() {
               </div>
               <h2>{selectedFolder ? "这个文件夹还是空的" : "还没有照片"}</h2>
               <p>{selectedFolder ? "添加第一批照片，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片。"}</p>
-              <button className="primary-button" onClick={() => selectedFolder ? fileInput.current?.click() : setNewFolderOpen(true)}>
-                {selectedFolder ? <Upload size={18} /> : <Plus size={18} />}
-                {selectedFolder ? "上传照片" : "新建文件夹"}
-              </button>
+              {(canUpload || isAdmin) && (
+                <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : setNewFolderOpen(true)}>
+                  {canUpload ? <Upload size={18} /> : <Plus size={18} />}
+                  {canUpload ? "上传照片" : "新建文件夹"}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -499,6 +611,25 @@ export default function Home() {
               <button className="secondary-button" onClick={() => setNewFolderOpen(false)}>取消</button>
               <button className="primary-button" disabled={!newFolderName.trim() || creatingFolder} onClick={() => void createFolder()}>
                 {creatingFolder ? <LoaderCircle className="spin" size={17} /> : <Plus size={17} />} 创建
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {adminOpen && (
+        <div className="modal-backdrop" onMouseDown={() => setAdminOpen(false)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon"><KeyRound size={20} /></span><h2 id="admin-title">管理相册</h2></div>
+              <button className="icon-button" onClick={() => setAdminOpen(false)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <label className="field-label" htmlFor="admin-key">管理口令</label>
+            <input id="admin-key" className="text-input" type="password" autoFocus value={adminInput} onChange={(event) => setAdminInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void unlockAdmin(); }} autoComplete="current-password" />
+            <div className="dialog-actions">
+              <button className="secondary-button" onClick={() => setAdminOpen(false)}>取消</button>
+              <button className="primary-button" disabled={!adminInput.trim() || verifyingAdmin} onClick={() => void unlockAdmin()}>
+                {verifyingAdmin ? <LoaderCircle className="spin" size={17} /> : <KeyRound size={17} />} 进入管理
               </button>
             </div>
           </section>

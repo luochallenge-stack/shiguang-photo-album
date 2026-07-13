@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { ensureSchema, getDb } from "../../../db";
 import { folders } from "../../../db/schema";
 import { createObjectKey, createUploadToken } from "../../../lib/qiniu";
+import { canWriteFolder, unauthorized } from "../../../lib/access";
 
 const IMAGE_TYPES = new Set([
   "image/jpeg",
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
       folderSlug?: string;
       filename?: string;
       mimeType?: string;
+      uploadToken?: string;
     };
     const selectedFolder = payload.folderSlug?.trim() || "";
     const filename = payload.filename?.trim() || "";
@@ -26,6 +28,7 @@ export async function POST(request: Request) {
     if (!selectedFolder || !filename || (!IMAGE_TYPES.has(payload.mimeType || "") && !imageExtension)) {
       return Response.json({ error: "上传参数无效" }, { status: 400 });
     }
+    if (!(await canWriteFolder(request, selectedFolder, payload.uploadToken))) return unauthorized();
 
     const db = getDb();
     const [folder] = await db

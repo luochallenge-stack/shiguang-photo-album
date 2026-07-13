@@ -8,6 +8,14 @@ export const folders = sqliteTable("folders", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const folderUploadTokens = sqliteTable("folder_upload_tokens", {
+  folderSlug: text("folder_slug")
+    .primaryKey()
+    .references(() => folders.slug, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const photos = sqliteTable(
   "photos",
   {

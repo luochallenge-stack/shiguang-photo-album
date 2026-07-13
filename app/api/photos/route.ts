@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { ensureSchema, getDb } from "../../../db";
 import { folders, photos } from "../../../db/schema";
+import { canWriteFolder, unauthorized } from "../../../lib/access";
+import { getQiniuConfig, publicObjectUrl } from "../../../lib/qiniu";
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +16,7 @@ export async function POST(request: Request) {
       mimeType?: string;
       width?: number | null;
       height?: number | null;
+      uploadToken?: string;
     };
     const folderSlug = payload.folderSlug?.trim() || "";
     const objectKey = payload.objectKey?.trim() || "";
@@ -21,12 +24,12 @@ export async function POST(request: Request) {
       !folderSlug ||
       !objectKey.startsWith(`albums/${folderSlug}/`) ||
       !payload.name ||
-      !payload.url ||
       !payload.mimeType ||
       !Number.isFinite(payload.size)
     ) {
       return Response.json({ error: "图片信息无效" }, { status: 400 });
     }
+    if (!(await canWriteFolder(request, folderSlug, payload.uploadToken))) return unauthorized();
 
     const db = getDb();
     const [folder] = await db
@@ -45,7 +48,7 @@ export async function POST(request: Request) {
         folderSlug,
         objectKey,
         name: payload.name.slice(0, 180),
-        url: payload.url,
+        url: publicObjectUrl(getQiniuConfig().domain, objectKey),
         size: Math.max(0, Math.round(payload.size || 0)),
         mimeType: payload.mimeType,
         width: payload.width || null,

@@ -14,6 +14,8 @@ test("builds the finished photo album surface", async () => {
   assert.match(page, /拾光册/);
   assert.match(page, /七牛 Kodo/);
   assert.match(page, /api\/folders/);
+  assert.match(page, /管理相册/);
+  assert.match(page, /api\/folders\/share/);
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape/);
 });
 
@@ -27,4 +29,5 @@ test("keeps Qiniu secrets server-side", async () => {
   assert.doesNotMatch(page, /QINIU_ACCESS_KEY|QINIU_SECRET_KEY/);
   assert.match(qiniu, /QINIU_SECRET_KEY/);
   assert.match(exampleEnv, /QINIU_BUCKET/);
+  assert.match(exampleEnv, /ALBUM_ADMIN_KEY/);
 });

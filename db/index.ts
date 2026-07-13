@@ -33,6 +33,14 @@ export function ensureSchema() {
           FOREIGN KEY (folder_slug) REFERENCES folders(slug) ON DELETE CASCADE
         )
       `),
+      env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS folder_upload_tokens (
+          folder_slug TEXT PRIMARY KEY NOT NULL,
+          token_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (folder_slug) REFERENCES folders(slug) ON DELETE CASCADE
+        )
+      `),
       env.DB.prepare(
         "CREATE INDEX IF NOT EXISTS photos_folder_created_idx ON photos(folder_slug, created_at)",
       ),

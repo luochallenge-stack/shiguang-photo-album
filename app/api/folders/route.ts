@@ -1,10 +1,12 @@
 import { ensureSchema, getDb } from "../../../db";
 import { folders } from "../../../db/schema";
 import { folderSlug, normalizeFolderName } from "../../../lib/validation";
+import { isAdminRequest, unauthorized } from "../../../lib/access";
 
 export async function POST(request: Request) {
   try {
     await ensureSchema();
+    if (!isAdminRequest(request)) return unauthorized();
     const payload = (await request.json()) as { name?: string };
     const name = normalizeFolderName(payload.name || "");
     if (!name) {
