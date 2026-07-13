@@ -114,6 +114,18 @@ Page({
     createFolderOpen: false,
     newFolderName: "",
     creatingFolder: false,
+    folderMenuOpen: false,
+    reorderingFolders: false,
+    renameOpen: false,
+    renameKind: "",
+    renameValue: "",
+    renameTarget: null,
+    renameMaxLength: 80,
+    renaming: false,
+    folderPasswordOpen: false,
+    folderPassword: "",
+    managedFolder: null,
+    folderSecuritySaving: false,
     editMode: false,
     batchSelectedCount: 0,
     allLoadedSelected: false,
@@ -174,18 +186,21 @@ Page({
           this.openUnlock(selected);
           return;
         }
-        const photos = payload.photos.map((photo) => ({
-          ...photo,
-          url: mediaUrl(photo.url),
-          thumbnailUrl: mediaUrl(photo.thumbnailUrl || photo.url),
-          video: String(photo.mimeType || "").startsWith("video/"),
-          sizeLabel: formatSize(photo.size || 0),
-          dateLabel: formatDate(photo.createdAt),
-          operatorLabel: operationLabel(photo),
-          operatorDateLabel: photo.lastActionAt ? formatDate(photo.lastActionAt) : "",
-          purgeDateLabel: photo.purgeAt ? formatDate(photo.purgeAt) : "",
-          selected: false,
-        }));
+        const photos = payload.photos.map((photo) => {
+          const video = String(photo.mimeType || "").startsWith("video/");
+          return {
+            ...photo,
+            url: mediaUrl(photo.url),
+            thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video ? "" : photo.url)),
+            video,
+            sizeLabel: formatSize(photo.size || 0),
+            dateLabel: formatDate(photo.createdAt),
+            operatorLabel: operationLabel(photo),
+            operatorDateLabel: photo.lastActionAt ? formatDate(photo.lastActionAt) : "",
+            purgeDateLabel: photo.purgeAt ? formatDate(photo.purgeAt) : "",
+            selected: false,
+          };
+        });
         this.setData({
           folders: payload.folders,
           photos: append ? this.data.photos.concat(photos) : photos,
@@ -221,6 +236,7 @@ Page({
 
   chooseFolder(event) {
     const slug = event.currentTarget.dataset.slug || "";
+    this.setData({ folderMenuOpen: false });
     this.exitEditMode();
     if (!slug) {
       this.loadLibrary("", false, false, false);
@@ -237,14 +253,52 @@ Page({
 
   chooseRecycleBin() {
     if (this.data.user.role !== "admin") return;
+    this.setData({ folderMenuOpen: false });
     this.exitEditMode();
     this.loadLibrary("", false, false, true);
+  },
+
+  toggleFolderMenu() {
+    this.setData({ folderMenuOpen: !this.data.folderMenuOpen });
+  },
+
+  closeFolderMenu() {
+    this.setData({ folderMenuOpen: false });
+  },
+
+  async moveFolderOrder(event) {
+    if (this.data.user.role !== "admin" || this.data.reorderingFolders) return;
+    const index = Number(event.currentTarget.dataset.index);
+    const direction = Number(event.currentTarget.dataset.direction);
+    const targetIndex = index + direction;
+    if (!Number.isInteger(index) || ![-1, 1].includes(direction) || targetIndex < 0 || targetIndex >= this.data.folders.length) return;
+
+    const previousFolders = this.data.folders.slice();
+    const folders = previousFolders.slice();
+    [folders[index], folders[targetIndex]] = [folders[targetIndex], folders[index]];
+    this.setData({ folders, reorderingFolders: true });
+    try {
+      await api.request("/api/folders/order", {
+        method: "PATCH",
+        data: { folderSlugs: folders.map((folder) => folder.slug) },
+      });
+    } catch (error) {
+      this.setData({ folders: previousFolders });
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "保存目录顺序失败", icon: "none" });
+    } finally {
+      this.setData({ reorderingFolders: false });
+    }
   },
 
   openCreateFolder() {
     if (this.data.user.role !== "admin" || this.data.creatingFolder) return;
     this.exitEditMode();
-    this.setData({ createFolderOpen: true, newFolderName: "" });
+    this.setData({ folderMenuOpen: false, createFolderOpen: true, newFolderName: "" });
   },
 
   closeCreateFolder() {
@@ -277,6 +331,155 @@ Page({
         return;
       }
       wx.showToast({ title: error.message || "创建文件夹失败", icon: "none" });
+    }
+  },
+
+  openFolderActions(event) {
+    if (this.data.user.role !== "admin") return;
+    const slug = event.currentTarget.dataset.slug;
+    const folder = this.data.folders.find((item) => item.slug === slug);
+    if (!folder) return;
+    const actions = ["重命名", folder.locked ? "更换密码" : "设置密码"];
+    if (folder.locked) actions.push("移除密码");
+    wx.showActionSheet({
+      itemList: actions,
+      success: ({ tapIndex }) => {
+        if (tapIndex === 0) this.openRename("folder", folder);
+        else if (tapIndex === 1) this.openFolderPassword(folder);
+        else if (tapIndex === 2) this.confirmRemoveFolderPassword(folder);
+      },
+    });
+  },
+
+  openRename(kind, target) {
+    if (this.data.user.role !== "admin" || !target) return;
+    this.setData({
+      folderMenuOpen: false,
+      renameOpen: true,
+      renameKind: kind,
+      renameValue: target.name || "",
+      renameTarget: target,
+      renameMaxLength: kind === "folder" ? 80 : 180,
+    });
+  },
+
+  updateRenameValue(event) {
+    this.setData({ renameValue: event.detail.value });
+  },
+
+  closeRename() {
+    if (this.data.renaming) return;
+    this.setData({ renameOpen: false, renameKind: "", renameValue: "", renameTarget: null });
+  },
+
+  async saveRename() {
+    const target = this.data.renameTarget;
+    const name = String(this.data.renameValue || "").trim();
+    if (!target || !name || this.data.renaming) return;
+    this.setData({ renaming: true });
+    try {
+      if (this.data.renameKind === "folder") {
+        await api.request("/api/folders/name", {
+          method: "PATCH",
+          data: { folderSlug: target.slug, name },
+        });
+        this.setData({
+          folders: this.data.folders.map((folder) => folder.slug === target.slug ? { ...folder, name } : folder),
+          selectedFolderName: this.data.selectedFolder === target.slug ? name : this.data.selectedFolderName,
+        });
+        wx.showToast({ title: "文件夹已重命名", icon: "success" });
+      } else {
+        await api.request("/api/photos", {
+          method: "PATCH",
+          data: { id: target.id, name },
+        });
+        wx.showToast({ title: "文件已重命名", icon: "success" });
+      }
+      const mediaRenamed = this.data.renameKind === "media";
+      this.setData({ renaming: false, renameOpen: false, renameKind: "", renameValue: "", renameTarget: null });
+      if (mediaRenamed) this.loadLibrary(this.data.selectedFolder, true, false, this.data.recycleMode);
+    } catch (error) {
+      this.setData({ renaming: false });
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "重命名失败", icon: "none" });
+    }
+  },
+
+  openFolderPassword(folder) {
+    this.setData({
+      folderMenuOpen: false,
+      folderPasswordOpen: true,
+      folderPassword: "",
+      managedFolder: folder,
+    });
+  },
+
+  updateFolderPassword(event) {
+    this.setData({ folderPassword: event.detail.value });
+  },
+
+  closeFolderPassword() {
+    if (this.data.folderSecuritySaving) return;
+    this.setData({ folderPasswordOpen: false, folderPassword: "", managedFolder: null });
+  },
+
+  async saveFolderPassword() {
+    const folder = this.data.managedFolder;
+    const password = this.data.folderPassword;
+    if (!folder || password.length < 4 || password.length > 128 || this.data.folderSecuritySaving) return;
+    this.setData({ folderSecuritySaving: true });
+    try {
+      await api.request("/api/folders", {
+        method: "PATCH",
+        data: { folderSlug: folder.slug, password },
+      });
+      this.setData({ folderSecuritySaving: false, folderPasswordOpen: false, folderPassword: "", managedFolder: null });
+      wx.showToast({ title: folder.locked ? "密码已更换" : "文件夹已加密", icon: "success" });
+      this.loadLibrary(this.data.selectedFolder, true, false, this.data.recycleMode);
+    } catch (error) {
+      this.setData({ folderSecuritySaving: false });
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "设置密码失败", icon: "none" });
+    }
+  },
+
+  confirmRemoveFolderPassword(folder) {
+    this.setData({ folderMenuOpen: false });
+    wx.showModal({
+      title: "移除文件夹密码",
+      content: `确定将“${folder.name}”设为公开文件夹吗？`,
+      confirmText: "移除密码",
+      confirmColor: "#b85246",
+      success: ({ confirm }) => {
+        if (confirm) this.removeFolderPassword(folder);
+      },
+    });
+  },
+
+  async removeFolderPassword(folder) {
+    if (!folder || this.data.folderSecuritySaving) return;
+    this.setData({ folderSecuritySaving: true });
+    try {
+      await api.request(`/api/folders?folderSlug=${encodeURIComponent(folder.slug)}`, { method: "DELETE" });
+      this.setData({ folderSecuritySaving: false });
+      wx.showToast({ title: "密码已移除", icon: "success" });
+      this.loadLibrary(this.data.selectedFolder, true, false, this.data.recycleMode);
+    } catch (error) {
+      this.setData({ folderSecuritySaving: false });
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "移除密码失败", icon: "none" });
     }
   },
 
@@ -318,7 +521,7 @@ Page({
   thumbnailError(event) {
     const id = event.currentTarget.dataset.id;
     const photos = this.data.photos.map((photo) => photo.id === id
-      ? { ...photo, thumbnailUrl: photo.url }
+      ? { ...photo, thumbnailUrl: photo.video ? "" : photo.url }
       : photo);
     this.setData({ photos });
   },
@@ -346,10 +549,17 @@ Page({
         const urls = this.data.photos
           .filter((photo) => !photo.video)
           .map((photo) => photo.id === item.id ? current : photo.url);
-        wx.previewImage({ current, urls });
+    wx.previewImage({ current, urls });
       })
       .catch((error) => wx.showToast({ title: error.message || "打开图片失败", icon: "none" }))
       .finally(() => wx.hideLoading());
+  },
+
+  openMediaActions(event) {
+    if (this.data.user.role !== "admin" || this.data.editMode) return;
+    const id = event.currentTarget.dataset.id;
+    const item = this.data.photos.find((photo) => photo.id === id);
+    if (item) this.openRename("media", item);
   },
 
   toggleEditMode() {
@@ -609,12 +819,13 @@ Page({
     if (!files.length || this.data.uploading) return;
     this.setData({ uploading: true, uploadProgress: 0, uploadLabel: `准备上传 1/${files.length}` });
     let completed = 0;
+    let coverFailures = 0;
     try {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
         this.setData({ uploadLabel: `正在上传${isVideoFile(file) ? "视频" : "照片"} ${index + 1}/${files.length}` });
         const filePath = await compressIfNeeded(file);
-        await api.uploadMedia(filePath, {
+        const result = await api.uploadMedia(filePath, {
           folderSlug: this.data.selectedFolder,
           name: uploadName(file, index),
           width: String(file.width || ""),
@@ -623,9 +834,29 @@ Page({
           const overall = Math.round(((index * 100) + progress) / files.length);
           this.setData({ uploadProgress: overall });
         });
+        if (isVideoFile(file)) {
+          const photoId = result.photo && result.photo.id;
+          if (photoId && file.thumbTempFilePath) {
+            this.setData({ uploadLabel: `正在保存视频封面 ${index + 1}/${files.length}` });
+            try {
+              await api.uploadVideoCover(file.thumbTempFilePath, {
+                photoId,
+                name: `视频封面-${photoId}.jpg`,
+              });
+            } catch {
+              coverFailures += 1;
+            }
+          } else {
+            coverFailures += 1;
+          }
+        }
         completed += 1;
       }
-      wx.showToast({ title: `已上传 ${completed} 项`, icon: "success" });
+      wx.showToast({
+        title: coverFailures ? `已上传，${coverFailures} 个封面失败` : `已上传 ${completed} 项`,
+        icon: coverFailures ? "none" : "success",
+        duration: coverFailures ? 3000 : 1500,
+      });
       this.loadLibrary(this.data.selectedFolder, true);
     } catch (error) {
       if (error.statusCode === 401) {

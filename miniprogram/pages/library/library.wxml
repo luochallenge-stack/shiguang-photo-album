@@ -1,6 +1,11 @@
 <view class="library-page safe-bottom {{editMode ? 'editing' : ''}}">
   <view class="member-bar">
     <view class="identity">
+      <button class="menu-button" bindtap="toggleFolderMenu" aria-label="打开文件目录">
+        <view class="menu-line" />
+        <view class="menu-line" />
+        <view class="menu-line" />
+      </button>
       <image class="logo" src="/images/logo.png" mode="aspectFill" />
       <view class="identity-copy">
         <text class="album-name">伞兵训练营的时光集</text>
@@ -10,22 +15,42 @@
     <button class="logout-button" bindtap="logout">退出</button>
   </view>
 
-  <scroll-view class="folder-strip" scroll-x enhanced show-scrollbar="{{false}}">
-    <view class="folder-list">
-      <button class="folder-chip {{selectedFolder === '' && !recycleMode ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">全部</button>
-      <button
-        wx:for="{{folders}}"
-        wx:key="id"
-        class="folder-chip {{selectedFolder === item.slug && !recycleMode ? 'active' : ''}}"
-        data-slug="{{item.slug}}"
-        bindtap="chooseFolder"
-      >
-        {{item.name}}<text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
-      </button>
-      <button wx:if="{{user.role === 'admin'}}" class="folder-chip create-folder-chip" bindtap="openCreateFolder" disabled="{{creatingFolder}}">＋ 新建</button>
-      <button wx:if="{{user.role === 'admin'}}" class="folder-chip recycle-chip {{recycleMode ? 'active' : ''}}" bindtap="chooseRecycleBin">回收站 {{recycleCount}}</button>
+  <view class="folder-menu-backdrop" wx:if="{{folderMenuOpen}}" bindtap="closeFolderMenu">
+    <view class="folder-menu-panel" catchtap="noop">
+      <view class="folder-menu-header">
+        <view>
+          <text class="folder-menu-eyebrow">伞兵训练营</text>
+          <text class="folder-menu-title">文件目录</text>
+        </view>
+        <button class="folder-menu-close" bindtap="closeFolderMenu" aria-label="关闭文件目录">×</button>
+      </view>
+      <button wx:if="{{user.role === 'admin'}}" class="create-folder-menu-button" bindtap="openCreateFolder" disabled="{{creatingFolder}}">＋ 新建文件夹</button>
+      <scroll-view class="folder-menu-list" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="folder-menu-row">
+          <button class="folder-menu-main {{selectedFolder === '' && !recycleMode ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">
+            <text>全部影像</text><text class="folder-count">全部</text>
+          </button>
+        </view>
+        <view class="folder-menu-row" wx:for="{{folders}}" wx:key="id">
+          <button class="folder-menu-main {{selectedFolder === item.slug && !recycleMode ? 'active' : ''}}" data-slug="{{item.slug}}" bindtap="chooseFolder">
+            <text class="folder-menu-name">{{item.name}}</text>
+            <text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
+            <text wx:else class="folder-count">{{item.photoCount}}</text>
+          </button>
+          <view wx:if="{{user.role === 'admin'}}" class="folder-order-actions">
+            <button class="folder-manage-button" data-slug="{{item.slug}}" bindtap="openFolderActions" aria-label="管理文件夹">···</button>
+            <button data-index="{{index}}" data-direction="-1" bindtap="moveFolderOrder" disabled="{{index === 0 || reorderingFolders}}" aria-label="上移文件夹">↑</button>
+            <button data-index="{{index}}" data-direction="1" bindtap="moveFolderOrder" disabled="{{index === folders.length - 1 || reorderingFolders}}" aria-label="下移文件夹">↓</button>
+          </view>
+        </view>
+        <view wx:if="{{user.role === 'admin'}}" class="folder-menu-row recycle-menu-row">
+          <button class="folder-menu-main {{recycleMode ? 'active' : ''}}" bindtap="chooseRecycleBin">
+            <text>回收站</text><text class="folder-count">{{recycleCount}}</text>
+          </button>
+        </view>
+      </scroll-view>
     </view>
-  </scroll-view>
+  </view>
 
   <view class="content-heading">
     <view>
@@ -58,11 +83,12 @@
   <view class="media-grid" wx:else>
     <view class="media-item {{item.selected ? 'selected' : ''}}" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
       <view class="media-preview">
-        <image wx:if="{{!item.video}}" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load data-id="{{item.id}}" binderror="thumbnailError" />
-        <view wx:else class="video-placeholder">
+        <image wx:if="{{item.thumbnailUrl}}" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load data-id="{{item.id}}" binderror="thumbnailError" />
+        <view wx:else class="video-placeholder"><text>{{item.video ? '视频' : '影像'}}</text></view>
+        <view wx:if="{{item.video}}" class="video-play-overlay">
           <view class="play-button"><view class="play-triangle" /></view>
-          <text>视频</text>
         </view>
+        <button wx:if="{{user.role === 'admin' && !editMode}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="重命名文件">···</button>
         <view wx:if="{{editMode}}" class="media-select {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</view>
       </view>
       <view class="media-copy">
@@ -88,6 +114,49 @@
     <view class="batch-actions" wx:else>
       <button class="batch-move" bindtap="openBatchMove" disabled="{{!batchSelectedCount || batchSaving}}">移动到</button>
       <button class="batch-delete" bindtap="confirmBatchDelete" disabled="{{!batchSelectedCount || batchSaving}}">移入回收站</button>
+    </view>
+  </view>
+
+  <view class="selection-backdrop" wx:if="{{renameOpen}}" bindtap="closeRename">
+    <view class="selection-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">{{renameKind === 'folder' ? '重命名文件夹' : '重命名文件'}}</text>
+      <text class="dialog-title">{{renameTarget.name}}</text>
+      <input
+        class="folder-name-input"
+        value="{{renameValue}}"
+        bindinput="updateRenameValue"
+        bindconfirm="saveRename"
+        confirm-type="done"
+        focus="{{renameOpen}}"
+        maxlength="{{renameMaxLength}}"
+      />
+      <view class="dialog-actions">
+        <button class="cancel-button" bindtap="closeRename" disabled="{{renaming}}">取消</button>
+        <button class="unlock-button" bindtap="saveRename" disabled="{{renaming || !renameValue}}" loading="{{renaming}}">保存</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="selection-backdrop" wx:if="{{folderPasswordOpen}}" bindtap="closeFolderPassword">
+    <view class="selection-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">{{managedFolder.locked ? '更换文件夹密码' : '加密文件夹'}}</text>
+      <text class="dialog-title">{{managedFolder.name}}</text>
+      <text class="dialog-copy">密码需要 4 至 128 个字符。</text>
+      <input
+        class="password-input"
+        password
+        value="{{folderPassword}}"
+        bindinput="updateFolderPassword"
+        bindconfirm="saveFolderPassword"
+        confirm-type="done"
+        focus="{{folderPasswordOpen}}"
+        maxlength="128"
+        placeholder="输入文件夹密码"
+      />
+      <view class="dialog-actions">
+        <button class="cancel-button" bindtap="closeFolderPassword" disabled="{{folderSecuritySaving}}">取消</button>
+        <button class="unlock-button" bindtap="saveFolderPassword" disabled="{{folderSecuritySaving || folderPassword.length < 4}}" loading="{{folderSecuritySaving}}">保存密码</button>
+      </view>
     </view>
   </view>
 

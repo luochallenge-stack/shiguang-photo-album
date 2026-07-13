@@ -6,6 +6,7 @@ export type AlbumFolder = {
   slug: string;
   createdAt: string;
   passwordHash?: string;
+  sortOrder?: number;
 };
 
 export type AlbumPhoto = {
@@ -19,6 +20,7 @@ export type AlbumPhoto = {
   mimeType: string;
   width: number | null;
   height: number | null;
+  coverFileId?: string;
   createdAt: string;
   deletedAt?: string;
   purgeAt?: string;
@@ -172,7 +174,14 @@ async function queryPhotoPage(
 
 export async function listFolders(): Promise<AlbumFolder[]> {
   const result = await database().collection(COLLECTIONS.folders).orderBy("createdAt", "desc").limit(100).get();
-  return rows<AlbumFolder>(result);
+  return rows<AlbumFolder>(result).sort((left, right) => {
+    const leftOrder = Number.isFinite(left.sortOrder) ? Number(left.sortOrder) : null;
+    const rightOrder = Number.isFinite(right.sortOrder) ? Number(right.sortOrder) : null;
+    if (leftOrder !== null && rightOrder !== null && leftOrder !== rightOrder) return leftOrder - rightOrder;
+    if (leftOrder !== null) return -1;
+    if (rightOrder !== null) return 1;
+    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  });
 }
 
 export async function findFolder(slug: string): Promise<AlbumFolder | null> {
@@ -188,6 +197,16 @@ export async function createFolderRecord(folder: AlbumFolder): Promise<void> {
 
 export async function updateFolderPasswordHash(id: string, passwordHash: string): Promise<void> {
   await database().collection(COLLECTIONS.folders).doc(id).update({ passwordHash });
+}
+
+export async function updateFolderName(id: string, name: string): Promise<void> {
+  await database().collection(COLLECTIONS.folders).doc(id).update({ name });
+}
+
+export async function updateFolderSortOrders(folderIds: string[]): Promise<void> {
+  await Promise.all(folderIds.map((id, sortOrder) => (
+    database().collection(COLLECTIONS.folders).doc(id).update({ sortOrder })
+  )));
 }
 
 export async function listPhotoPage(options: {
@@ -268,6 +287,10 @@ export async function restorePhotoRecord(id: string, actorName: string): Promise
 
 export async function deletePhotoRecord(id: string): Promise<void> {
   await database().collection(COLLECTIONS.photos).doc(id).remove();
+}
+
+export async function updatePhotoCoverFileId(id: string, coverFileId: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({ coverFileId });
 }
 
 export async function getUploadTokenRecord(folderSlug: string): Promise<UploadTokenRecord | null> {
@@ -367,8 +390,9 @@ export async function confirmUploadedFile(fileId: string, expectedSize: number):
 }
 
 export async function deletePhotoFiles(fileIds: string[]): Promise<void> {
-  for (let index = 0; index < fileIds.length; index += 50) {
-    const result = await getCloudBase().deleteFile({ fileList: fileIds.slice(index, index + 50) });
+  const uniqueFileIds = [...new Set(fileIds.filter(Boolean))];
+  for (let index = 0; index < uniqueFileIds.length; index += 50) {
+    const result = await getCloudBase().deleteFile({ fileList: uniqueFileIds.slice(index, index + 50) });
     const failure = result.fileList?.find((item) => item.code !== "SUCCESS" && item.code !== "STORAGE_FILE_NONEXIST");
     if (failure) throw new Error(`腾讯云存储删除失败：${failure.code}`);
   }
@@ -376,6 +400,10 @@ export async function deletePhotoFiles(fileIds: string[]): Promise<void> {
 
 export async function deletePhotoFile(fileId: string): Promise<void> {
   await deletePhotoFiles([fileId]);
+}
+
+export function mediaFileIds(photos: AlbumPhoto[]): string[] {
+  return photos.flatMap((photo) => [photo.fileId, photo.coverFileId || ""]).filter(Boolean);
 }
 
 export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {
@@ -391,7 +419,7 @@ export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {
     .get();
   const expired = rows<AlbumPhoto>(result);
   if (!expired.length) return 0;
-  await deletePhotoFiles(expired.map((photo) => photo.fileId));
+  await deletePhotoFiles(mediaFileIds(expired));
   await Promise.all(expired.map((photo) => deletePhotoRecord(photo.id)));
   return expired.length;
 }

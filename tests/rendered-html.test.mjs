@@ -134,7 +134,7 @@ test("paginates CloudBase media queries by album for both clients", async () => 
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {
-  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute] = await Promise.all([
+  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute, libraryTemplate, folderOrderRoute, folderNameRoute, coverRoute, cloudbase] = await Promise.all([
     readFile(new URL("../miniprogram/project.config.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/app.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/utils/api.js", import.meta.url), "utf8"),
@@ -146,6 +146,11 @@ test("ships a native WeChat mini program with token authentication", async () =>
     readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/folders/order/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/folders/name/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/cover/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
     access(new URL("../miniprogram/images/logo.png", import.meta.url)),
   ]);
   const project = JSON.parse(projectText);
@@ -159,10 +164,34 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /api\/folders\/unlock/);
   assert.match(library, /api\.request\("\/api\/folders"/);
   assert.match(library, /createFolder/);
+  assert.match(library, /moveFolderOrder/);
+  assert.match(library, /\/api\/folders\/order/);
+  assert.match(libraryTemplate, /folder-menu-panel/);
+  assert.match(libraryTemplate, /create-folder-menu-button/);
+  assert.match(libraryTemplate, /menu-line/);
+  assert.match(folderOrderRoute, /updateFolderSortOrders/);
+  assert.match(folderNameRoute, /updateFolderName/);
+  assert.match(cloudbase, /sortOrder/);
+  assert.match(library, /openFolderActions/);
+  assert.match(library, /saveFolderPassword/);
+  assert.match(library, /removeFolderPassword/);
+  assert.match(library, /\/api\/folders\/name/);
+  assert.match(library, /openMediaActions/);
+  assert.match(library, /method: "PATCH"/);
+  assert.match(libraryTemplate, /folder-manage-button/);
+  assert.match(libraryTemplate, /media-more/);
+  assert.match(libraryTemplate, /folderPasswordOpen/);
   assert.match(library, /wx\.chooseMedia/);
   assert.match(library, /mediaType: \["image", "video"\]/);
   assert.match(library, /MAX_VIDEO_BYTES = 500/);
   assert.match(library, /api\.uploadMedia/);
+  assert.match(library, /thumbTempFilePath/);
+  assert.match(library, /api\.uploadVideoCover/);
+  assert.match(api, /\/api\/photos\/cover/);
+  assert.match(coverRoute, /updatePhotoCoverFileId/);
+  assert.match(libraryRoute, /coverUrls/);
+  assert.match(cloudbase, /coverFileId/);
+  assert.match(cloudbase, /mediaFileIds/);
   assert.match(library, /onReachBottom/);
   assert.match(library, /MAX_UPLOAD_COUNT = 50/);
   assert.match(library, /PICKER_BATCH_SIZE = 9/);

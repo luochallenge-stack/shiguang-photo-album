@@ -55,11 +55,11 @@ function request(path, options = {}) {
   });
 }
 
-function uploadMedia(filePath, formData, onProgress) {
+function uploadFile(path, filePath, formData, onProgress) {
   const token = getSessionToken();
   return new Promise((resolve, reject) => {
     const task = wx.uploadFile({
-      url: `${API_BASE}/api/photos`,
+      url: `${API_BASE}${path}`,
       filePath,
       name: "file",
       formData,
@@ -91,6 +91,14 @@ function uploadMedia(filePath, formData, onProgress) {
   });
 }
 
+function uploadMedia(filePath, formData, onProgress) {
+  return uploadFile("/api/photos", filePath, formData, onProgress);
+}
+
+function uploadVideoCover(filePath, formData) {
+  return uploadFile("/api/photos/cover", filePath, formData);
+}
+
 function authenticate(mode, data) {
   return request(`/api/auth/${mode}`, { method: "POST", data }).then((payload) => {
     if (!payload.sessionToken || !payload.user) throw new Error("服务器没有返回小程序登录凭证");
@@ -109,4 +117,5 @@ module.exports = {
   request,
   saveSession,
   uploadMedia,
+  uploadVideoCover,
 };

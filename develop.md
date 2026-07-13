@@ -58,8 +58,8 @@
 
 | 集合 | 类型 | 用途 |
 | --- | --- | --- |
-| `album_folders` | `AlbumFolder` | 文件夹名称、slug、创建时间和可选密码摘要 |
-| `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、所属文件夹、回收站时间和最近操作人 |
+| `album_folders` | `AlbumFolder` | 文件夹名称、slug、目录顺序、创建时间和可选密码摘要 |
+| `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、视频封面、所属文件夹、回收站时间和最近操作人 |
 | `album_upload_tokens` | `UploadTokenRecord` | 每个文件夹当前有效的上传链接令牌摘要 |
 | `album_users` | `AlbumUser` | 本地账号、角色、状态和密码摘要 |
 | `album_audit_logs` | `AlbumAuditLog` | 登录、浏览和修改操作日志 |
@@ -67,7 +67,9 @@
 关键字段约定：
 
 - `folder.slug` 是 API、URL、对象路径和关联查询使用的稳定标识；显示名称变化不应直接改 slug。
+- `folder.sortOrder` 是管理员保存的目录顺序；历史记录缺少该字段时按 `createdAt` 倒序回退。
 - `photo.fileId` 是生成临时访问地址、查询文件和删除文件的权威标识。
+- `photo.coverFileId` 是可选的视频封面文件标识；永久删除视频时必须与 `fileId` 一并删除。
 - `photo.objectKey` 是云存储中的对象路径，格式为 `albums/{folderSlug}/{时间戳}-{随机值}-{文件名}`。
 - `photo.url` 不是永久公开地址。读取列表和播放前应通过 `resolvePhotoUrls` 生成临时地址。
 - `photo.deletedAt` 和 `photo.purgeAt` 表示回收站状态；正常列表必须排除 `deletedAt` 非空的记录。
@@ -159,6 +161,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 3. 客户端提前拒绝超过 50 MB 的图片和超过 500 MB 的视频；大于 8 MB 的图片使用 `wx.compressImage`，视频不压缩。
 4. `wx.uploadFile` 以 multipart 请求调用 `POST /api/photos`。
 5. 服务端读取文件、校验管理员权限、上传云存储并写入数据库。
+6. 视频上传成功后，小程序把 `wx.chooseMedia` 返回的首帧缩略图上传到 `POST /api/photos/cover`，列表通过 `coverFileId` 获取临时封面地址。
 
 该链路会让文件内容经过 CloudBase Run 并在服务端转为 Buffer，因此虽然功能上允许视频，长视频或接近 500 MB 上限的文件仍可能受网络、超时和请求体限制。需要稳定支持大视频时，应改为小程序可用的云存储直传，而不是继续放宽 multipart 限制。
 
@@ -193,12 +196,15 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `GET/DELETE /api/auth/session` | 登录 | 读取会话或退出 |
 | `GET /api/library` | 登录 | 按文件夹分页返回可见媒体；双端支持 `limit/offset` |
 | `POST /api/folders` | admin | 创建文件夹 |
+| `PATCH /api/folders/order` | admin | 保存完整文件目录顺序 |
+| `PATCH /api/folders/name` | admin | 重命名文件夹，保持 slug 不变 |
 | `PATCH/DELETE /api/folders` | admin | 设置、更换或移除文件夹密码 |
 | `POST /api/folders/unlock` | 登录 | 解锁加密文件夹 |
 | `POST /api/folders/share` | admin | 生成或轮换上传链接令牌 |
 | `POST /api/photos/upload` | admin/上传令牌 | 生成 Web 直传信息和票据 |
 | `PATCH /api/photos/upload` | admin/上传令牌 | 确认 Web 直传并登记媒体 |
-| `POST /api/photos` | admin/上传令牌 | multipart 上传，当前供小程序图片使用 |
+| `POST /api/photos` | admin/上传令牌 | multipart 上传，供小程序照片和视频使用 |
+| `POST /api/photos/cover` | admin | 为已上传视频保存首帧封面 |
 | `PATCH/DELETE /api/photos` | admin | 重命名单项媒体，或将其移入回收站 |
 | `PATCH/DELETE /api/photos/batch` | admin | 批量移动，或将最多 100 项影像移入回收站 |
 | `PATCH/DELETE /api/photos/recycle` | admin | 批量恢复，或立即永久删除回收站影像 |
@@ -270,6 +276,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 所有 `wx.request` 自动添加 Bearer 令牌和 `x-album-client`。
 - 加密文件夹请求按需添加 `x-album-folder-token`。
 - `uploadMedia` 封装照片/视频的 `wx.uploadFile` 和上传进度，单文件超时为 10 分钟。
+- `uploadVideoCover` 在视频登记成功后上传 `thumbTempFilePath`，封面失败不会重复上传原视频。
 
 ### `pages/login`
 
@@ -282,6 +289,10 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 每页请求 24 项，滚动到底继续加载。
 - 使用 request id 防止切换文件夹时旧请求覆盖新状态。
 - 图片使用缩略图和 lazy-load，失败时回退原图。
+- Logo 旁的三横按钮打开文件目录；管理员的新建入口固定在目录顶部，并可用上下箭头持久化调整文件夹顺序。
+- 文件夹“更多”操作支持重命名、设置或更换密码、移除密码；文件夹 slug 始终保持不变。
+- 管理员可从影像卡片右上角重命名单项照片或视频，保存后重新加载以刷新最近操作人。
+- 新上传视频使用微信选择器返回的首帧缩略图作为列表封面，没有封面的历史视频继续显示占位状态。
 - 加密文件夹访问令牌按 slug 保存。
 - 普通成员只读；管理员可新建文件夹，选择具体文件夹后可创建最多 50 项照片/视频的上传任务。
 - 管理员编辑模式单次最多选择 100 项，支持批量移动和移入回收站。
@@ -378,7 +389,7 @@ https://7061-paratrooper-battalion-d1b3b82e83-1313194650.tcb.qcloud.la
 - 影像列表使用数据库 `skip/limit` 分页；大量数据或高并发写入场景可进一步升级为基于 `createdAt + id` 的游标分页。
 - Web 搜索目前只过滤已经加载到浏览器的页面，不是服务端全文搜索。
 - 解锁失败限流存在单进程内存，不能跨实例共享。
-- 小程序支持管理员新建文件夹、批量移动、回收站和照片/视频上传，但仍不支持单项重命名、文件夹加密管理和用户管理。
+- 小程序支持管理员新建、重命名、排序和加密文件夹，支持单项文件重命名、批量移动、回收站和带首帧封面的照片/视频上传；用户授权和日志查看仍在网页管理端完成。
 - 小程序 multipart 上传经过应用服务器，不适合大文件。
 - 云存储写入/删除与数据库记录不是事务操作；中途失败可能产生孤立对象或孤立记录，批量导入前应设计补偿和对账。
 - `album-client.tsx` 体积较大，复杂迭代前可渐进拆分。

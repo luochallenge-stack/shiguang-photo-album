@@ -3,6 +3,7 @@ import {
   deletePhotoRecord,
   findFolder,
   findPhoto,
+  mediaFileIds,
   restorePhotoRecord,
   type AlbumPhoto,
 } from "../../../../lib/cloudbase";
@@ -75,7 +76,7 @@ export async function DELETE(request: Request) {
     const photos = await recycledPhotos(ids);
     if (!photos) return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
 
-    await deletePhotoFiles(photos.map((photo) => photo.fileId));
+    await deletePhotoFiles(mediaFileIds(photos));
     await Promise.all(photos.map((photo) => deletePhotoRecord(photo.id)));
     await Promise.all(photos.map((photo) => recordAudit(request, user, {
       action: "media.purge.batch",

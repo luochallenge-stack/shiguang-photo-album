@@ -63,6 +63,9 @@ export async function GET(request: Request) {
     const photoRows = page.photos;
     const recycleCount = standaloneRecycleCount ?? page.total;
     const resolvedUrls = await resolvePhotoUrls(photoRows.map((photo) => photo.fileId));
+    const coverRows = photoRows.filter((photo) => Boolean(photo.coverFileId));
+    const resolvedCoverUrls = await resolvePhotoUrls(coverRows.map((photo) => photo.coverFileId || ""));
+    const coverUrls = new Map(coverRows.map((photo, index) => [photo.id, resolvedCoverUrls[index] || ""]));
 
     await recordAudit(request, user, {
       action: recycleBin ? "recycle.view" : "album.view",
@@ -78,12 +81,21 @@ export async function GET(request: Request) {
         name: folder.name,
         slug: folder.slug,
         createdAt: folder.createdAt,
+        sortOrder: folder.sortOrder,
         locked: Boolean(folder.passwordHash),
         photoCount: folder.passwordHash ? 0 : counts[folder.slug] || 0,
       })),
       photos: photoRows.map((photo, index) => {
         const resolvedUrl = resolvedUrls[index] || photo.url;
-        return { ...photo, url: resolvedUrl, thumbnailUrl: thumbnailUrl(resolvedUrl, photo.mimeType) };
+        const coverUrl = coverUrls.get(photo.id) || "";
+        return {
+          ...photo,
+          url: resolvedUrl,
+          coverUrl,
+          thumbnailUrl: coverUrl
+            ? thumbnailUrl(coverUrl, "image/jpeg")
+            : thumbnailUrl(resolvedUrl, photo.mimeType),
+        };
       }),
       total: page.total,
       nextOffset: offset + photoRows.length,
