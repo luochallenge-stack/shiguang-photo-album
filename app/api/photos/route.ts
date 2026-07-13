@@ -52,6 +52,8 @@ export async function POST(request: Request) {
       width: Number(form.get("width")) || null,
       height: Number(form.get("height")) || null,
       createdAt,
+      deletedAt: "",
+      purgeAt: "",
       lastAction: "upload" as const,
       lastActionBy: user.displayName,
       lastActionAt: createdAt,

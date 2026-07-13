@@ -278,6 +278,10 @@ button { color: inherit; }
 .batch-toolbar > div:first-child > span strong { color: var(--ink); }
 
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
+.search-empty { min-height: 180px; display: grid; place-items: center; color: var(--muted); font-size: 12px; text-align: center; }
+.library-pagination { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 22px; color: var(--muted); font-size: 11px; }
+.library-pagination strong { color: #77817e; font-size: 10px; font-weight: 700; }
+.library-pagination .secondary-button svg:not(.spin) { transform: rotate(90deg); }
 .photo-list { display: grid; gap: 8px; }
 .photo-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: white; transition: transform .16s, box-shadow .16s; }
 .photo-grid .photo-card:hover { transform: translateY(-2px); box-shadow: 0 9px 24px rgba(22,43,36,.09); }

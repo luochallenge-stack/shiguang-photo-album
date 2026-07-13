@@ -27,6 +27,14 @@ export type AlbumPhoto = {
   lastActionAt?: string;
 };
 
+export type AlbumPhotoPage = {
+  photos: AlbumPhoto[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+};
+
 export type AlbumUserRole = "admin" | "member";
 export type AlbumUserStatus = "active" | "disabled";
 export type AlbumUserProvider = "local" | "admin";
@@ -111,6 +119,57 @@ function rows<T>(result: { data?: unknown[] }): T[] {
   });
 }
 
+function pageBounds(offset: number, limit: number): { offset: number; limit: number } {
+  return {
+    offset: Number.isSafeInteger(offset) && offset > 0 ? offset : 0,
+    limit: Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 48,
+  };
+}
+
+function activePhotoFilter(folderSlug?: string, excludedFolderSlugs: string[] = []): Record<string, unknown> {
+  const command = database().command;
+  return {
+    deletedAt: command.exists(false).or(command.eq("")),
+    ...(folderSlug
+      ? { folderSlug }
+      : excludedFolderSlugs.length
+        ? { folderSlug: command.nin(excludedFolderSlugs) }
+        : {}),
+  };
+}
+
+function recycledPhotoFilter(): Record<string, unknown> {
+  const command = database().command;
+  return { deletedAt: command.exists(true).and(command.neq("")) };
+}
+
+async function queryPhotoPage(
+  filter: Record<string, unknown>,
+  orderField: "createdAt" | "deletedAt",
+  offset: number,
+  limit: number,
+): Promise<AlbumPhotoPage> {
+  const bounds = pageBounds(offset, limit);
+  const collection = database().collection(COLLECTIONS.photos);
+  const [result, count] = await Promise.all([
+    collection
+      .where(filter)
+      .orderBy(orderField, "desc")
+      .skip(bounds.offset)
+      .limit(bounds.limit)
+      .get(),
+    collection.where(filter).count(),
+  ]);
+  const photos = rows<AlbumPhoto>(result);
+  const total = Math.max(0, Number(count.total) || 0);
+  return {
+    photos,
+    total,
+    ...bounds,
+    hasMore: bounds.offset + photos.length < total,
+  };
+}
+
 export async function listFolders(): Promise<AlbumFolder[]> {
   const result = await database().collection(COLLECTIONS.folders).orderBy("createdAt", "desc").limit(100).get();
   return rows<AlbumFolder>(result);
@@ -131,18 +190,43 @@ export async function updateFolderPasswordHash(id: string, passwordHash: string)
   await database().collection(COLLECTIONS.folders).doc(id).update({ passwordHash });
 }
 
-export async function listPhotos(folderSlug?: string): Promise<AlbumPhoto[]> {
-  const collection = database().collection(COLLECTIONS.photos);
-  const query = folderSlug ? collection.where({ folderSlug }) : collection;
-  const result = await query.orderBy("createdAt", "desc").limit(300).get();
-  return rows<AlbumPhoto>(result).filter((photo) => !photo.deletedAt);
+export async function listPhotoPage(options: {
+  folderSlug?: string;
+  excludedFolderSlugs?: string[];
+  offset?: number;
+  limit?: number;
+} = {}): Promise<AlbumPhotoPage> {
+  return queryPhotoPage(
+    activePhotoFilter(options.folderSlug, options.excludedFolderSlugs),
+    "createdAt",
+    options.offset || 0,
+    options.limit || 48,
+  );
 }
 
-export async function listRecycledPhotos(): Promise<AlbumPhoto[]> {
-  const result = await database().collection(COLLECTIONS.photos).orderBy("createdAt", "desc").limit(300).get();
-  return rows<AlbumPhoto>(result)
-    .filter((photo) => Boolean(photo.deletedAt))
-    .sort((left, right) => String(right.deletedAt).localeCompare(String(left.deletedAt)));
+export async function listRecycledPhotoPage(options: { offset?: number; limit?: number } = {}): Promise<AlbumPhotoPage> {
+  return queryPhotoPage(recycledPhotoFilter(), "deletedAt", options.offset || 0, options.limit || 48);
+}
+
+export async function countActivePhotosByFolder(): Promise<Record<string, number>> {
+  const cloudDatabase = database();
+  const aggregate = cloudDatabase.command.aggregate;
+  const result = await cloudDatabase
+    .collection(COLLECTIONS.photos)
+    .aggregate()
+    .match(activePhotoFilter())
+    .group({ _id: "$folderSlug", total: aggregate.sum(1) })
+    .end();
+  const counts: Record<string, number> = {};
+  for (const item of (result.data || []) as Array<{ _id?: unknown; total?: unknown }>) {
+    if (typeof item._id === "string" && item._id) counts[item._id] = Math.max(0, Number(item.total) || 0);
+  }
+  return counts;
+}
+
+export async function countRecycledPhotos(): Promise<number> {
+  const result = await database().collection(COLLECTIONS.photos).where(recycledPhotoFilter()).count();
+  return Math.max(0, Number(result.total) || 0);
 }
 
 export async function createPhotoRecord(photo: AlbumPhoto): Promise<void> {
@@ -295,9 +379,17 @@ export async function deletePhotoFile(fileId: string): Promise<void> {
 }
 
 export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {
-  const expired = (await listRecycledPhotos())
-    .filter((photo) => photo.purgeAt && new Date(photo.purgeAt).getTime() <= now)
-    .slice(0, 50);
+  const cloudDatabase = database();
+  const command = cloudDatabase.command;
+  const result = await cloudDatabase
+    .collection(COLLECTIONS.photos)
+    .where({
+      purgeAt: command.exists(true).and(command.neq("")).and(command.lte(new Date(now).toISOString())),
+    })
+    .orderBy("purgeAt", "asc")
+    .limit(50)
+    .get();
+  const expired = rows<AlbumPhoto>(result);
   if (!expired.length) return 0;
   await deletePhotoFiles(expired.map((photo) => photo.fileId));
   await Promise.all(expired.map((photo) => deletePhotoRecord(photo.id)));

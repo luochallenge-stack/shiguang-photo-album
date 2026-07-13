@@ -42,6 +42,7 @@ import type { AlbumAuditLog } from "@/lib/cloudbase";
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
 const MAX_BATCH_SELECTION = 100;
+const WEB_PAGE_SIZE = 48;
 
 type FolderItem = {
   id: string;
@@ -81,6 +82,9 @@ type UploadItem = {
 type LibraryResponse = {
   folders: FolderItem[];
   photos: PhotoItem[];
+  total: number;
+  nextOffset: number;
+  hasMore: boolean;
   storageConfigured: boolean;
   folderLocked: boolean;
   recycleCount: number;
@@ -301,7 +305,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [storageConfigured, setStorageConfigured] = useState(false);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
   const [recycleCount, setRecycleCount] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -337,29 +345,48 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [securityPassword, setSecurityPassword] = useState("");
   const [savingSecurity, setSavingSecurity] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const libraryRequestId = useRef(0);
   const isAdmin = initialUser.role === "admin";
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
     ...(contentType ? { "content-type": "application/json" } : {}),
   });
 
-  const loadLibrary = useCallback(async (folder = selectedFolder, recycleBin = false) => {
-    setLoading(true);
+  const loadLibrary = useCallback(async (folder = selectedFolder, recycleBin = false, append = false) => {
+    if (append && (!hasMore || loadingMore)) return;
+    const requestId = ++libraryRequestId.current;
+    const offset = append ? nextOffset : 0;
+    setLoading(!append);
+    setLoadingMore(append);
     setError("");
     try {
-      const query = recycleBin ? "?recycle=1" : folder ? `?folder=${encodeURIComponent(folder)}` : "";
-      const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`));
+      const query = new URLSearchParams({ limit: String(WEB_PAGE_SIZE), offset: String(offset) });
+      if (recycleBin) query.set("recycle", "1");
+      else if (folder) query.set("folder", folder);
+      const data = await readJson<LibraryResponse>(await fetch(`/api/library?${query}`));
+      if (requestId !== libraryRequestId.current) return;
       setFolders(data.folders);
-      setPhotos(data.photos);
+      setPhotos((current) => {
+        if (!append) return data.photos;
+        const seen = new Set(current.map((photo) => photo.id));
+        return [...current, ...data.photos.filter((photo) => !seen.has(photo.id))];
+      });
+      setTotal(Number(data.total) || 0);
+      setNextOffset(Number(data.nextOffset) || 0);
+      setHasMore(Boolean(data.hasMore));
       setStorageConfigured(data.storageConfigured);
       setFolderLocked(data.folderLocked);
       setRecycleCount(data.recycleCount || 0);
     } catch (cause) {
+      if (requestId !== libraryRequestId.current) return;
       setError(cause instanceof Error ? cause.message : "读取相册失败");
     } finally {
-      setLoading(false);
+      if (requestId === libraryRequestId.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [selectedFolder]);
+  }, [hasMore, loadingMore, nextOffset, selectedFolder]);
 
   useEffect(() => {
     if (window.location.hostname === LEGACY_ALBUM_HOST) {
@@ -660,15 +687,9 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         }),
       );
       const deletedId = deletingPhoto.id;
-      setPhotos((current) => current.filter((photo) => photo.id !== deletedId));
-      setFolders((current) => current.map((folder) => (
-        folder.slug === deletingPhoto.folderSlug
-          ? { ...folder, photoCount: Math.max(0, folder.photoCount - 1) }
-          : folder
-      )));
-      setRecycleCount((current) => current + 1);
       setPreview((current) => current?.id === deletedId ? null : current);
       setDeletingPhoto(null);
+      await loadLibrary(selectedFolder);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "移入回收站失败");
     } finally {
@@ -1003,7 +1024,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           <div className="section-heading">
             <div>
               <h1>{showRecycleBin ? "回收站" : activeFolder?.name || "全部影像"}</h1>
-              <p>{folderLocked ? "需要密码访问" : editMode ? `已选择 ${selectedPhotoIds.length} 项` : `${visiblePhotos.length} 项影像`}</p>
+              <p>{folderLocked
+                ? "需要密码访问"
+                : editMode
+                  ? `已选择 ${selectedPhotoIds.length} 项`
+                  : search.trim()
+                    ? `当前已加载内容中找到 ${visiblePhotos.length} 项 · 共 ${total} 项`
+                    : `${total} 项影像`}</p>
             </div>
             {!folderLocked && <div className="section-controls">
               {isAdmin && visiblePhotos.length > 0 && (
@@ -1088,7 +1115,9 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 </button>
               </form>
             </section>
-          ) : visiblePhotos.length ? (
+          ) : photos.length ? (
+            <>
+            {visiblePhotos.length ? (
             <div className={viewMode === "grid" ? "photo-grid" : "photo-list"}>
               {visiblePhotos.map((photo) => (
                 <article className={`photo-card ${editMode ? "editing" : ""} ${selectedPhotoSet.has(photo.id) ? "selected" : ""}`} key={photo.id}>
@@ -1127,6 +1156,23 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 </article>
               ))}
             </div>
+            ) : (
+              <div className="search-empty">当前已加载的影像中没有匹配项，可以继续加载下一页后再搜索。</div>
+            )}
+            <div className="library-pagination" aria-live="polite">
+              <span>已加载 {photos.length} / {total} 项</span>
+              {hasMore ? (
+                <button
+                  className="secondary-button"
+                  onClick={() => void loadLibrary(selectedFolder, showRecycleBin, true)}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? <LoaderCircle className="spin" size={16} /> : <ChevronRight size={16} />}
+                  {loadingMore ? "正在加载" : "加载更多"}
+                </button>
+              ) : <strong>已经显示全部影像</strong>}
+            </div>
+            </>
           ) : (
             <div className="empty-state">
               <div className="empty-visual">

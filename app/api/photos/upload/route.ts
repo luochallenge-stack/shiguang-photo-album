@@ -104,6 +104,8 @@ export async function PATCH(request: Request) {
       width: ticket.width,
       height: ticket.height,
       createdAt,
+      deletedAt: "",
+      purgeAt: "",
       lastAction: "upload",
       lastActionBy: user.displayName,
       lastActionAt: createdAt,

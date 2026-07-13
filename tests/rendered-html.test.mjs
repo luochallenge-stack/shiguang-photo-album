@@ -105,11 +105,32 @@ test("supports dual-client batch editing with a seven-day recycle bin", async ()
   assert.match(libraryRoute, /purgeExpiredPhotos/);
   assert.match(libraryRoute, /recycleCount/);
   assert.match(cloudbase, /lastActionBy/);
-  assert.match(cloudbase, /listRecycledPhotos/);
+  assert.match(cloudbase, /listRecycledPhotoPage/);
   assert.match(miniLibrary, /toggleEditMode/);
   assert.match(miniLibrary, /restoreSelectedMedia/);
   assert.match(miniTemplate, /移入回收站/);
   assert.match(miniTemplate, /item\.operatorLabel/);
+});
+
+test("paginates CloudBase media queries by album for both clients", async () => {
+  const [cloudbase, libraryRoute, client, miniLibrary] = await Promise.all([
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(cloudbase, /listPhotoPage/);
+  assert.match(cloudbase, /skip\(bounds\.offset\)/);
+  assert.match(cloudbase, /countActivePhotosByFolder/);
+  assert.match(cloudbase, /aggregate\(\)/);
+  assert.match(cloudbase, /purgeAt: command\.exists/);
+  assert.match(libraryRoute, /folderSlug: selectedFolder/);
+  assert.match(libraryRoute, /excludedFolderSlugs/);
+  assert.match(libraryRoute, /listRecycledPhotoPage\(\{ offset, limit \}\)/);
+  assert.match(client, /WEB_PAGE_SIZE = 48/);
+  assert.match(client, /加载更多/);
+  assert.match(miniLibrary, /PAGE_SIZE = 24/);
+  assert.match(miniLibrary, /onReachBottom/);
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {

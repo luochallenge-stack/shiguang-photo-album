@@ -10,7 +10,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "find miniprogram -name '*.js' -print0 | xargs -0 -n1 node --check && eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "find miniprogram -name '*.js' -print0 | xargs -0 -n1 node --check && eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern outputs",
     "db:generate": "echo 'CloudBase collections are managed by tcb CLI'"
   },
   "dependencies": {

@@ -1,16 +1,20 @@
 import {
   cloudBaseIsConfigured,
+  countActivePhotosByFolder,
+  countRecycledPhotos,
   listFolders,
-  listPhotos,
-  listRecycledPhotos,
+  listPhotoPage,
+  listRecycledPhotoPage,
   purgeExpiredPhotos,
   resolvePhotoUrls,
+  type AlbumPhotoPage,
 } from "../../../lib/cloudbase";
 import { canReadFolder } from "../../../lib/access";
 import { currentUser, forbidden, isMiniProgramRequest, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 
 const MINI_PROGRAM_PAGE_SIZE = 24;
+const WEB_PAGE_SIZE = 48;
 
 function thumbnailUrl(url: string, mimeType: string): string {
   if (!mimeType.startsWith("image/") || !url.startsWith("http")) return "";
@@ -27,33 +31,37 @@ export async function GET(request: Request) {
     const recycleBin = url.searchParams.get("recycle") === "1";
     if (recycleBin && user.role !== "admin") return forbidden();
     await purgeExpiredPhotos().catch((error) => console.error("Failed to purge recycled photos", error));
-    const paginated = isMiniProgramRequest(request) || url.searchParams.has("limit");
     const requestedLimit = Number(url.searchParams.get("limit"));
-    const limit = paginated
-      ? Math.max(
-          1,
-          Math.min(
-            48,
-            Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : MINI_PROGRAM_PAGE_SIZE,
-          ),
-        )
-      : 300;
+    const defaultLimit = isMiniProgramRequest(request) ? MINI_PROGRAM_PAGE_SIZE : WEB_PAGE_SIZE;
+    const limit = Math.max(
+      1,
+      Math.min(48, Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : defaultLimit),
+    );
     const requestedOffset = Number(url.searchParams.get("offset"));
-    const offset = paginated && Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
-    const [folderRows, allPhotos, recycledPhotos] = await Promise.all([listFolders(), listPhotos(), listRecycledPhotos()]);
+    const offset = Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
+    const folderRows = await listFolders();
     const selectedFolderRow = selectedFolder ? folderRows.find((folder) => folder.slug === selectedFolder) : undefined;
     const folderLocked = Boolean(
       selectedFolderRow?.passwordHash && !(await canReadFolder(request, selectedFolderRow, user)),
     );
-    const lockedSlugs = new Set(folderRows.filter((folder) => Boolean(folder.passwordHash)).map((folder) => folder.slug));
-    const visiblePhotoRows = recycleBin
-      ? recycledPhotos
-      : selectedFolder
-        ? (folderLocked ? [] : allPhotos.filter((photo) => photo.folderSlug === selectedFolder))
-        : allPhotos.filter((photo) => !lockedSlugs.has(photo.folderSlug));
-    const photoRows = paginated ? visiblePhotoRows.slice(offset, offset + limit) : visiblePhotoRows;
-    const counts = new Map<string, number>();
-    for (const photo of allPhotos) counts.set(photo.folderSlug, (counts.get(photo.folderSlug) || 0) + 1);
+    const lockedSlugs = folderRows.filter((folder) => Boolean(folder.passwordHash)).map((folder) => folder.slug);
+    const emptyPage: AlbumPhotoPage = { photos: [], total: 0, offset, limit, hasMore: false };
+    const [page, counts, standaloneRecycleCount] = await Promise.all([
+      folderLocked
+        ? Promise.resolve(emptyPage)
+        : recycleBin
+          ? listRecycledPhotoPage({ offset, limit })
+          : listPhotoPage({
+              folderSlug: selectedFolder,
+              excludedFolderSlugs: selectedFolder ? [] : lockedSlugs,
+              offset,
+              limit,
+            }),
+      countActivePhotosByFolder(),
+      recycleBin ? Promise.resolve<number | null>(null) : countRecycledPhotos(),
+    ]);
+    const photoRows = page.photos;
+    const recycleCount = standaloneRecycleCount ?? page.total;
     const resolvedUrls = await resolvePhotoUrls(photoRows.map((photo) => photo.fileId));
 
     await recordAudit(request, user, {
@@ -71,16 +79,16 @@ export async function GET(request: Request) {
         slug: folder.slug,
         createdAt: folder.createdAt,
         locked: Boolean(folder.passwordHash),
-        photoCount: folder.passwordHash ? 0 : counts.get(folder.slug) || 0,
+        photoCount: folder.passwordHash ? 0 : counts[folder.slug] || 0,
       })),
       photos: photoRows.map((photo, index) => {
         const resolvedUrl = resolvedUrls[index] || photo.url;
         return { ...photo, url: resolvedUrl, thumbnailUrl: thumbnailUrl(resolvedUrl, photo.mimeType) };
       }),
-      total: visiblePhotoRows.length,
+      total: page.total,
       nextOffset: offset + photoRows.length,
-      hasMore: offset + photoRows.length < visiblePhotoRows.length,
-      recycleCount: recycledPhotos.length,
+      hasMore: page.hasMore,
+      recycleCount,
       recycleBin,
       storageConfigured: cloudBaseIsConfigured(),
       folderLocked,
