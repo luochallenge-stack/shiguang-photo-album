@@ -34,7 +34,7 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.doesNotMatch(auth + login, /open\.weixin|graph\.qq|微信登录|QQ 登录/);
   assert.match(client, /api\/folders\/share/);
   assert.match(client, /重命名\{mediaLabel\(editingPhoto\)\}/);
-  assert.match(client, /删除\{mediaLabel\(deletingPhoto\)\}/);
+  assert.match(client, /移入回收站/);
   assert.match(client, /这个文件夹已加密/);
   assert.match(client, /设置密码/);
   assert.match(client, /api\/folders\/unlock/);
@@ -74,6 +74,42 @@ test("keeps CloudBase credentials server-side", async () => {
   assert.match(exampleEnv, /ALBUM_ADMIN_KEY/);
   assert.doesNotMatch(client, /ALBUM_SESSION_SECRET/);
   assert.doesNotMatch(auth + exampleEnv, /WECHAT_APP_SECRET|QQ_APP_KEY/);
+});
+
+test("limits desktop image previews to 70 percent of the viewport", async () => {
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(styles, /@media \(min-width: 681px\)/);
+  assert.match(styles, /\.preview-canvas img \{ max-width: 70vw; max-height: 70vh; \}/);
+});
+
+test("supports dual-client batch editing with a seven-day recycle bin", async () => {
+  const [client, styles, libraryRoute, batchRoute, recycleRoute, cloudbase, miniLibrary, miniTemplate] = await Promise.all([
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/batch/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/recycle/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+  ]);
+  assert.match(client, /editMode/);
+  assert.match(client, /\/api\/photos\/batch/);
+  assert.match(client, /\/api\/photos\/recycle/);
+  assert.match(client, /operationLabel/);
+  assert.match(styles, /\.batch-toolbar/);
+  assert.match(batchRoute, /7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(batchRoute, /recyclePhotoRecord/);
+  assert.match(recycleRoute, /restorePhotoRecord/);
+  assert.match(recycleRoute, /deletePhotoFiles/);
+  assert.match(libraryRoute, /purgeExpiredPhotos/);
+  assert.match(libraryRoute, /recycleCount/);
+  assert.match(cloudbase, /lastActionBy/);
+  assert.match(cloudbase, /listRecycledPhotos/);
+  assert.match(miniLibrary, /toggleEditMode/);
+  assert.match(miniLibrary, /restoreSelectedMedia/);
+  assert.match(miniTemplate, /移入回收站/);
+  assert.match(miniTemplate, /item\.operatorLabel/);
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {

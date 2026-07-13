@@ -1,6 +1,6 @@
 import { canReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
-import { currentUser, unauthenticated } from "../../../../lib/auth";
+import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { findFolder, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
 import { isVideoMimeType } from "../../../../lib/media";
 
@@ -13,6 +13,7 @@ export async function GET(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
+    if (photo.deletedAt && user.role !== "admin") return forbidden();
     const folder = await findFolder(photo.folderSlug);
     if (!folder || !(await canReadFolder(request, folder, user))) {
       return Response.json({ error: "这个文件夹仍处于锁定状态" }, { status: 403 });

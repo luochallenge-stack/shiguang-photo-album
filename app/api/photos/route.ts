@@ -1,10 +1,9 @@
 import {
   createObjectKey,
   createPhotoRecord,
-  deletePhotoFile,
-  deletePhotoRecord,
   findFolder,
   findPhoto,
+  recyclePhotoRecord,
   renamePhotoRecord,
   uploadPhoto,
 } from "../../../lib/cloudbase";
@@ -12,6 +11,8 @@ import { canWriteFolder, unauthorized } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
+
+const RECYCLE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
 
     const objectKey = createObjectKey(folderSlug, name);
     const uploaded = await uploadPhoto(objectKey, Buffer.from(await file.arrayBuffer()));
+    const createdAt = new Date().toISOString();
     const photo = {
       id: crypto.randomUUID(),
       folderSlug,
@@ -49,7 +51,10 @@ export async function POST(request: Request) {
       mimeType: media.mimeType,
       width: Number(form.get("width")) || null,
       height: Number(form.get("height")) || null,
-      createdAt: new Date().toISOString(),
+      createdAt,
+      lastAction: "upload" as const,
+      lastActionBy: user.displayName,
+      lastActionAt: createdAt,
     };
     await createPhotoRecord(photo);
     await recordAudit(request, user, {
@@ -79,7 +84,8 @@ export async function PATCH(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
-    await renamePhotoRecord(id, name);
+    const lastActionAt = new Date().toISOString();
+    await renamePhotoRecord(id, name, user.displayName);
     await recordAudit(request, user, {
       action: "media.rename",
       resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
@@ -87,7 +93,13 @@ export async function PATCH(request: Request) {
       resourceName: name,
       metadata: { previousName: photo.name, folderSlug: photo.folderSlug },
     });
-    return Response.json({ photo: { ...photo, name } });
+    return Response.json({ photo: {
+      ...photo,
+      name,
+      lastAction: "rename",
+      lastActionBy: user.displayName,
+      lastActionAt,
+    } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "重命名文件失败";
     return Response.json({ error: message }, { status: 500 });
@@ -104,18 +116,20 @@ export async function DELETE(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
-    await deletePhotoFile(photo.fileId);
-    await deletePhotoRecord(id);
+    if (photo.deletedAt) return Response.json({ error: "文件已经位于回收站" }, { status: 400 });
+    const deletedAt = new Date().toISOString();
+    const purgeAt = new Date(Date.now() + RECYCLE_RETENTION_MS).toISOString();
+    await recyclePhotoRecord(id, deletedAt, purgeAt, user.displayName);
     await recordAudit(request, user, {
-      action: "media.delete",
+      action: "media.recycle",
       resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
       resourceId: photo.id,
       resourceName: photo.name,
-      metadata: { folderSlug: photo.folderSlug, size: photo.size },
+      metadata: { folderSlug: photo.folderSlug, size: photo.size, purgeAt },
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, purgeAt });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "删除文件失败";
+    const message = error instanceof Error ? error.message : "移入回收站失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }

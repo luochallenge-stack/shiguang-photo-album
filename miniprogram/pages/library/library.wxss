@@ -1,4 +1,5 @@
 .library-page { min-height: 100vh; padding-bottom: 48rpx; }
+.library-page.editing { padding-bottom: 240rpx; }
 .member-bar { display: flex; align-items: center; justify-content: space-between; gap: 22rpx; padding: 28rpx 28rpx 24rpx; color: #ffffff; background: #21483f; }
 .identity { min-width: 0; display: flex; align-items: center; gap: 18rpx; }
 .logo { width: 72rpx; height: 72rpx; flex: 0 0 auto; border-radius: 12rpx; }
@@ -17,6 +18,11 @@
 .photo-count { margin-top: 8rpx; color: #7b8783; font-size: 21rpx; }
 .upload-button { width: 126rpx; height: 64rpx; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 8rpx; color: #ffffff; background: #b85246; font-size: 23rpx; font-weight: 700; line-height: 64rpx; }
 .upload-button[disabled] { color: rgba(255,255,255,.75); background: #b88b85; }
+.heading-actions { display: flex; align-items: center; gap: 12rpx; }
+.edit-button { width: 106rpx; height: 64rpx; margin: 0; padding: 0; border: 1rpx solid #cad5d1; border-radius: 8rpx; color: #42544e; background: #ffffff; font-size: 23rpx; line-height: 62rpx; }
+.edit-button.active { border-color: #9dbdb3; color: #21483f; background: #e4efeb; }
+.edit-button[disabled] { color: #a0aaa6; background: #edf0ef; }
+.recycle-notice { margin: 0 28rpx 22rpx; padding: 18rpx 20rpx; border: 1rpx solid #d8dfdc; border-radius: 8rpx; color: #5e6b67; background: #f3f6f5; font-size: 21rpx; line-height: 1.5; }
 .skeleton-grid { display: flex; flex-wrap: wrap; gap: 18rpx; padding: 0 28rpx; }
 .skeleton-item { width: calc((100% - 18rpx) / 2); overflow: hidden; border: 1rpx solid #e0e6e3; border-radius: 12rpx; background: #ffffff; box-sizing: border-box; }
 .skeleton-image { height: 328rpx; background: #e4e9e7; }
@@ -24,6 +30,7 @@
 .skeleton-line.short { width: 44%; margin-top: 12rpx; margin-bottom: 20rpx; }
 .media-grid { display: flex; flex-wrap: wrap; gap: 18rpx; padding: 0 28rpx; }
 .media-item { width: calc((100% - 18rpx) / 2); min-width: 0; overflow: hidden; border: 1rpx solid #dfe5e2; border-radius: 12rpx; background: #ffffff; box-sizing: border-box; }
+.media-item.selected { border-color: #21483f; box-shadow: 0 0 0 3rpx rgba(33,72,63,.15); }
 .media-preview { position: relative; width: 100%; height: 328rpx; overflow: hidden; background: #e9eeec; }
 .media-preview image { width: 100%; height: 100%; display: block; }
 .video-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16rpx; color: #5d6d67; background: #dfe9e6; font-size: 21rpx; }
@@ -32,7 +39,20 @@
 .media-copy { padding: 18rpx; }
 .media-name { overflow: hidden; font-size: 24rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .media-meta { margin-top: 9rpx; overflow: hidden; color: #83908c; font-size: 19rpx; text-overflow: ellipsis; white-space: nowrap; }
+.media-operator, .purge-date { display: block; margin-top: 8rpx; overflow: hidden; font-size: 18rpx; text-overflow: ellipsis; white-space: nowrap; }
+.media-operator { color: #38695d; }
+.purge-date { color: #b85246; }
+.media-select { position: absolute; z-index: 2; top: 16rpx; right: 16rpx; width: 48rpx; height: 48rpx; display: flex; align-items: center; justify-content: center; border: 4rpx solid #ffffff; border-radius: 50%; color: #ffffff; background: rgba(17,23,21,.52); box-shadow: 0 4rpx 14rpx rgba(0,0,0,.2); box-sizing: border-box; font-size: 28rpx; font-weight: 700; }
+.media-select.checked { border-color: #21483f; background: #21483f; }
 .load-more { padding: 30rpx 28rpx 8rpx; color: #8a9692; font-size: 21rpx; text-align: center; }
+.batch-toolbar { position: fixed; z-index: 16; right: 0; bottom: 0; left: 0; padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom)); border-top: 1rpx solid #d9e0dd; background: #ffffff; box-shadow: 0 -10rpx 28rpx rgba(18,45,38,.12); }
+.batch-summary, .batch-actions { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; }
+.batch-summary { margin-bottom: 14rpx; color: #66736f; font-size: 21rpx; }
+.batch-summary button { width: auto; height: 48rpx; margin: 0; padding: 0 14rpx; color: #21483f; background: #e4efeb; font-size: 20rpx; line-height: 48rpx; }
+.batch-actions button { width: 50%; height: 70rpx; margin: 0; border-radius: 8rpx; font-size: 23rpx; font-weight: 700; line-height: 70rpx; }
+.batch-move { color: #21483f; background: #e4efeb; }
+.batch-delete { color: #ffffff; background: #b85246; }
+.batch-actions button[disabled] { color: #9ca6a2; background: #e8ecea; }
 .loading, .empty-state, .error-state { min-height: 460rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40rpx; color: #7a8883; font-size: 24rpx; text-align: center; }
 .empty-title { color: #31413c; font-size: 29rpx; font-weight: 700; }
 .empty-copy { margin-top: 14rpx; line-height: 1.6; }
@@ -56,6 +76,7 @@
 .selection-upload { color: #ffffff; background: #b85246; }
 .selection-actions button[disabled] { color: #9ba6a2; background: #e7ebe9; }
 .selection-cancel { width: 100%; height: 66rpx; margin: 16rpx 0 0; color: #73807c; background: transparent; font-size: 22rpx; line-height: 66rpx; }
+.folder-picker { height: 82rpx; margin-top: 26rpx; padding: 0 22rpx; overflow: hidden; border: 1rpx solid #cbd6d2; border-radius: 10rpx; color: #31413c; background: #ffffff; font-size: 26rpx; line-height: 82rpx; text-overflow: ellipsis; white-space: nowrap; }
 .upload-status { position: fixed; z-index: 18; right: 24rpx; bottom: calc(24rpx + env(safe-area-inset-bottom)); left: 24rpx; padding: 22rpx 24rpx; border-radius: 10rpx; color: #ffffff; background: #21483f; box-shadow: 0 12rpx 36rpx rgba(18,45,38,.22); }
 .upload-status-copy { display: flex; align-items: center; justify-content: space-between; font-size: 22rpx; }
 .upload-track { height: 8rpx; margin-top: 16rpx; overflow: hidden; border-radius: 4rpx; background: rgba(255,255,255,.2); }

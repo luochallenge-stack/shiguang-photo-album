@@ -41,6 +41,7 @@ import type { AlbumAuditLog } from "@/lib/cloudbase";
 
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
+const MAX_BATCH_SELECTION = 100;
 
 type FolderItem = {
   id: string;
@@ -62,6 +63,11 @@ type PhotoItem = {
   width: number | null;
   height: number | null;
   createdAt: string;
+  deletedAt?: string;
+  purgeAt?: string;
+  lastAction?: "upload" | "rename" | "move" | "recycle" | "restore";
+  lastActionBy?: string;
+  lastActionAt?: string;
 };
 
 type UploadItem = {
@@ -77,6 +83,8 @@ type LibraryResponse = {
   photos: PhotoItem[];
   storageConfigured: boolean;
   folderLocked: boolean;
+  recycleCount: number;
+  recycleBin: boolean;
 };
 
 type AdminSection = "users" | "logs";
@@ -128,6 +136,12 @@ const ACTION_LABELS: Record<string, string> = {
   "media.upload": "上传影像",
   "media.rename": "重命名影像",
   "media.delete": "删除影像",
+  "media.move.batch": "批量移动影像",
+  "media.recycle": "移入回收站",
+  "media.recycle.batch": "批量移入回收站",
+  "media.restore.batch": "批量恢复影像",
+  "media.purge.batch": "永久删除影像",
+  "recycle.view": "查看回收站",
   "folder.create": "创建文件夹",
   "folder.unlock": "解锁文件夹",
   "folder.unlock.failed": "解锁失败",
@@ -268,11 +282,25 @@ function mediaLabel(photo: PhotoItem): "照片" | "视频" {
   return isVideoMimeType(photo.mimeType) ? "视频" : "照片";
 }
 
+function operationLabel(photo: PhotoItem): string {
+  const labels: Record<NonNullable<PhotoItem["lastAction"]>, string> = {
+    upload: "上传",
+    rename: "重命名",
+    move: "移动",
+    recycle: "移入回收站",
+    restore: "恢复",
+  };
+  if (!photo.lastActionBy) return "历史影像";
+  return `${photo.lastActionBy} ${photo.lastAction ? labels[photo.lastAction] : "操作"}`;
+}
+
 export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [storageConfigured, setStorageConfigured] = useState(false);
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
+  const [recycleCount, setRecycleCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -296,6 +324,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [editingName, setEditingName] = useState("");
   const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
   const [savingPhoto, setSavingPhoto] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [batchMoveOpen, setBatchMoveOpen] = useState(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchTargetFolder, setBatchTargetFolder] = useState("");
+  const [batchSaving, setBatchSaving] = useState(false);
   const [folderLocked, setFolderLocked] = useState(false);
   const [unlockPassword, setUnlockPassword] = useState("");
   const [unlockingFolder, setUnlockingFolder] = useState(false);
@@ -309,16 +343,17 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     ...(contentType ? { "content-type": "application/json" } : {}),
   });
 
-  const loadLibrary = useCallback(async (folder = selectedFolder) => {
+  const loadLibrary = useCallback(async (folder = selectedFolder, recycleBin = false) => {
     setLoading(true);
     setError("");
     try {
-      const query = folder ? `?folder=${encodeURIComponent(folder)}` : "";
+      const query = recycleBin ? "?recycle=1" : folder ? `?folder=${encodeURIComponent(folder)}` : "";
       const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`));
       setFolders(data.folders);
       setPhotos(data.photos);
       setStorageConfigured(data.storageConfigured);
       setFolderLocked(data.folderLocked);
+      setRecycleCount(data.recycleCount || 0);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "读取相册失败");
     } finally {
@@ -355,14 +390,26 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     if (!query) return photos;
     return photos.filter((photo) => photo.name.toLocaleLowerCase().includes(query));
   }, [photos, search]);
+  const selectedPhotoSet = useMemo(() => new Set(selectedPhotoIds), [selectedPhotoIds]);
+  const selectableVisiblePhotos = visiblePhotos.slice(0, MAX_BATCH_SELECTION);
+  const allVisibleSelected = selectableVisiblePhotos.length > 0 && selectableVisiblePhotos.every((photo) => selectedPhotoSet.has(photo.id));
+  const moveTargets = useMemo(
+    () => showRecycleBin ? [] : selectedFolder ? folders.filter((folder) => folder.slug !== selectedFolder) : folders,
+    [folders, selectedFolder, showRecycleBin],
+  );
   const canUpload = Boolean(
-    selectedFolder && (isAdmin || (sharedUploadToken && sharedFolder === selectedFolder)),
+    !showRecycleBin && selectedFolder && (isAdmin || (sharedUploadToken && sharedFolder === selectedFolder)),
   );
 
   const chooseFolder = (slug: string) => {
     setActiveView("album");
+    setShowRecycleBin(false);
     setPhotos([]);
     setPreview(null);
+    setEditMode(false);
+    setSelectedPhotoIds([]);
+    setBatchMoveOpen(false);
+    setBatchDeleteOpen(false);
     setFolderLocked(false);
     setUnlockPassword("");
     setSelectedFolder(slug);
@@ -370,7 +417,24 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     if (slug) url.searchParams.set("folder", slug);
     else url.searchParams.delete("folder");
     window.history.replaceState({}, "", url);
-    void loadLibrary(slug);
+    void loadLibrary(slug, false);
+  };
+
+  const chooseRecycleBin = () => {
+    setActiveView("album");
+    setShowRecycleBin(true);
+    setSelectedFolder("");
+    setPhotos([]);
+    setPreview(null);
+    setFolderLocked(false);
+    setEditMode(false);
+    setSelectedPhotoIds([]);
+    setBatchMoveOpen(false);
+    setBatchDeleteOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("folder");
+    window.history.replaceState({}, "", url);
+    void loadLibrary("", true);
   };
 
   const createFolder = async () => {
@@ -573,8 +637,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           body: JSON.stringify({ id: editingPhoto.id, name }),
         }),
       );
-      setPhotos((current) => current.map((photo) => (photo.id === result.photo.id ? { ...photo, name: result.photo.name } : photo)));
-      setPreview((current) => current?.id === result.photo.id ? { ...current, name: result.photo.name } : current);
+      setPhotos((current) => current.map((photo) => (photo.id === result.photo.id ? { ...photo, ...result.photo } : photo)));
+      setPreview((current) => current?.id === result.photo.id ? { ...current, ...result.photo } : current);
       setEditingPhoto(null);
       setEditingName("");
     } catch (cause) {
@@ -602,12 +666,125 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           ? { ...folder, photoCount: Math.max(0, folder.photoCount - 1) }
           : folder
       )));
+      setRecycleCount((current) => current + 1);
       setPreview((current) => current?.id === deletedId ? null : current);
       setDeletingPhoto(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "删除文件失败");
+      setError(cause instanceof Error ? cause.message : "移入回收站失败");
     } finally {
       setSavingPhoto(false);
+    }
+  };
+
+  const leaveEditMode = (force = false) => {
+    if (batchSaving && !force) return;
+    setEditMode(false);
+    setSelectedPhotoIds([]);
+    setBatchMoveOpen(false);
+    setBatchDeleteOpen(false);
+    setBatchTargetFolder("");
+  };
+
+  const togglePhotoSelection = (photoId: string) => {
+    if (!selectedPhotoSet.has(photoId) && selectedPhotoIds.length >= MAX_BATCH_SELECTION) {
+      setError(`单次最多选择 ${MAX_BATCH_SELECTION} 项影像`);
+      return;
+    }
+    setSelectedPhotoIds((current) => current.includes(photoId)
+      ? current.filter((id) => id !== photoId)
+      : [...current, photoId]);
+  };
+
+  const toggleAllVisible = () => {
+    const visibleIds = new Set(selectableVisiblePhotos.map((photo) => photo.id));
+    setSelectedPhotoIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.has(id))
+      : [...new Set([...current, ...visibleIds])].slice(0, MAX_BATCH_SELECTION));
+    if (!allVisibleSelected && visiblePhotos.length > MAX_BATCH_SELECTION) {
+      setError(`已选择当前结果中的前 ${MAX_BATCH_SELECTION} 项`);
+    }
+  };
+
+  const openBatchMove = () => {
+    if (!selectedPhotoIds.length || !moveTargets.length) return;
+    setBatchTargetFolder(moveTargets[0].slug);
+    setBatchMoveOpen(true);
+  };
+
+  const moveSelectedPhotos = async () => {
+    if (!selectedPhotoIds.length || !batchTargetFolder || batchSaving) return;
+    setBatchSaving(true);
+    setError("");
+    try {
+      const result = await readJson<{ movedCount: number; skippedCount: number }>(await fetch("/api/photos/batch", {
+        method: "PATCH",
+        headers: adminHeaders(true),
+        body: JSON.stringify({ ids: selectedPhotoIds, targetFolderSlug: batchTargetFolder }),
+      }));
+      await loadLibrary(selectedFolder);
+      leaveEditMode(true);
+      if (!result.movedCount && result.skippedCount) setError("所选影像已经位于目标文件夹");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "批量移动影像失败");
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const deleteSelectedPhotos = async () => {
+    if (!selectedPhotoIds.length || batchSaving) return;
+    setBatchSaving(true);
+    setError("");
+    try {
+      await readJson<{ recycledCount: number }>(await fetch("/api/photos/batch", {
+        method: "DELETE",
+        headers: adminHeaders(true),
+        body: JSON.stringify({ ids: selectedPhotoIds }),
+      }));
+      await loadLibrary(selectedFolder);
+      leaveEditMode(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "批量移入回收站失败");
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const restoreSelectedPhotos = async () => {
+    if (!selectedPhotoIds.length || batchSaving) return;
+    setBatchSaving(true);
+    setError("");
+    try {
+      await readJson<{ restoredCount: number }>(await fetch("/api/photos/recycle", {
+        method: "PATCH",
+        headers: adminHeaders(true),
+        body: JSON.stringify({ ids: selectedPhotoIds }),
+      }));
+      await loadLibrary("", true);
+      leaveEditMode(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "批量恢复影像失败");
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const purgeSelectedPhotos = async () => {
+    if (!selectedPhotoIds.length || batchSaving) return;
+    setBatchSaving(true);
+    setError("");
+    try {
+      await readJson<{ purgedCount: number }>(await fetch("/api/photos/recycle", {
+        method: "DELETE",
+        headers: adminHeaders(true),
+        body: JSON.stringify({ ids: selectedPhotoIds }),
+      }));
+      await loadLibrary("", true);
+      leaveEditMode(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "永久删除影像失败");
+    } finally {
+      setBatchSaving(false);
     }
   };
 
@@ -702,7 +879,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               </button>
             )}
           </div>
-          <button className={`folder-row ${selectedFolder ? "" : "active"}`} onClick={() => chooseFolder("")}>
+          <button className={`folder-row ${!selectedFolder && !showRecycleBin ? "active" : ""}`} onClick={() => chooseFolder("")}>
             <Images size={18} />
             <span>全部影像</span>
             <b>{totalPhotos}</b>
@@ -710,7 +887,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           {folders.map((folder) => (
             <button
               key={folder.id}
-              className={`folder-row ${selectedFolder === folder.slug ? "active" : ""}`}
+              className={`folder-row ${!showRecycleBin && selectedFolder === folder.slug ? "active" : ""}`}
               onClick={() => chooseFolder(folder.slug)}
             >
               {folder.locked
@@ -720,6 +897,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <b>{folder.locked ? <LockKeyhole size={13} aria-label="已加密" /> : folder.photoCount}</b>
             </button>
           ))}
+          {isAdmin && (
+            <button className={`folder-row recycle-row ${showRecycleBin ? "active" : ""}`} onClick={chooseRecycleBin}>
+              <Trash2 size={18} />
+              <span>回收站</span>
+              <b>{recycleCount}</b>
+            </button>
+          )}
           {isAdmin && (
             <button className={`folder-row admin-nav-row ${activeView === "admin" ? "active" : ""}`} onClick={() => openAdminView("users")}>
               <Users size={18} />
@@ -755,7 +939,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         <header className="topbar">
           <div className="breadcrumb">
             <span>相册</span><ChevronRight size={15} />
-            <strong>{activeFolder?.name || "全部影像"}</strong>
+            <strong>{showRecycleBin ? "回收站" : activeFolder?.name || "全部影像"}</strong>
           </div>
           <div className="top-actions">
             <label className="search-box">
@@ -783,9 +967,9 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 {activeFolder?.locked ? "更换密码" : "设置密码"}
               </button>
             )}
-            <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
+            {!showRecycleBin && <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
               <Upload size={18} /> 上传影像
-            </button>
+            </button>}
             <input ref={fileInput} type="file" accept="image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,video/mpeg,.mov,.m4v" multiple hidden onChange={onFileChange} />
           </div>
         </header>
@@ -809,19 +993,63 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <button className="icon-button" onClick={() => setError("")} aria-label="关闭"><X size={16} /></button>
             </div>
           )}
+          {showRecycleBin && (
+            <div className="recycle-notice" role="status">
+              <Trash2 size={17} />
+              <span>回收站中的影像保留 7 天，到期后会自动永久删除；可在到期前批量恢复。</span>
+            </div>
+          )}
 
           <div className="section-heading">
             <div>
-              <h1>{activeFolder?.name || "全部影像"}</h1>
-              <p>{folderLocked ? "需要密码访问" : `${visiblePhotos.length} 项影像`}</p>
+              <h1>{showRecycleBin ? "回收站" : activeFolder?.name || "全部影像"}</h1>
+              <p>{folderLocked ? "需要密码访问" : editMode ? `已选择 ${selectedPhotoIds.length} 项` : `${visiblePhotos.length} 项影像`}</p>
             </div>
-            {!folderLocked && <div className="view-toggle" aria-label="视图切换">
-              <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="网格视图" aria-label="网格视图"><Grid2X2 size={17} /></button>
-              <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")} title="列表视图" aria-label="列表视图"><LayoutList size={18} /></button>
+            {!folderLocked && <div className="section-controls">
+              {isAdmin && visiblePhotos.length > 0 && (
+                <button className={`secondary-button edit-mode-button ${editMode ? "active" : ""}`} onClick={() => editMode ? leaveEditMode() : setEditMode(true)}>
+                  {editMode ? <X size={16} /> : <Pencil size={16} />}
+                  {editMode ? "退出编辑" : "编辑"}
+                </button>
+              )}
+              <div className="view-toggle" aria-label="视图切换">
+                <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="网格视图" aria-label="网格视图"><Grid2X2 size={17} /></button>
+                <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")} title="列表视图" aria-label="列表视图"><LayoutList size={18} /></button>
+              </div>
             </div>}
           </div>
 
-          {canUpload && (
+          {editMode && (
+            <div className="batch-toolbar" role="toolbar" aria-label="批量编辑影像">
+              <div>
+                <button className="secondary-button" onClick={toggleAllVisible}>
+                  <Check size={16} /> {allVisibleSelected ? "取消全选" : visiblePhotos.length > MAX_BATCH_SELECTION ? "选择前 100 项" : "全选当前结果"}
+                </button>
+                <span>已选择 <strong>{selectedPhotoIds.length}</strong> 项</span>
+              </div>
+              {showRecycleBin ? (
+                <div>
+                  <button className="secondary-button" disabled={!selectedPhotoIds.length || batchSaving} onClick={() => void restoreSelectedPhotos()}>
+                    <FolderOpen size={16} /> 恢复
+                  </button>
+                  <button className="danger-button" disabled={!selectedPhotoIds.length || batchSaving} onClick={() => setBatchDeleteOpen(true)}>
+                    <Trash2 size={16} /> 永久删除
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <button className="secondary-button" disabled={!selectedPhotoIds.length || !moveTargets.length || batchSaving} onClick={openBatchMove}>
+                    <FolderOpen size={16} /> 移动到
+                  </button>
+                  <button className="danger-button" disabled={!selectedPhotoIds.length || batchSaving} onClick={() => setBatchDeleteOpen(true)}>
+                    <Trash2 size={16} /> 移入回收站
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {canUpload && !editMode && (
             <div
               className={`drop-zone ${dragging ? "dragging" : ""}`}
               onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
@@ -863,21 +1091,29 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           ) : visiblePhotos.length ? (
             <div className={viewMode === "grid" ? "photo-grid" : "photo-list"}>
               {visiblePhotos.map((photo) => (
-                <article className="photo-card" key={photo.id}>
-                  <button className="photo-preview" onClick={() => openPreview(photo)} aria-label={`预览 ${photo.name}`}>
+                <article className={`photo-card ${editMode ? "editing" : ""} ${selectedPhotoSet.has(photo.id) ? "selected" : ""}`} key={photo.id}>
+                  <button
+                    className="photo-preview"
+                    onClick={() => editMode ? togglePhotoSelection(photo.id) : openPreview(photo)}
+                    aria-label={editMode ? `${selectedPhotoSet.has(photo.id) ? "取消选择" : "选择"} ${photo.name}` : `预览 ${photo.name}`}
+                  >
                     {isVideoMimeType(photo.mimeType)
                       ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
                       : <img src={photo.url} alt={photo.name} loading="lazy" />}
                     {isVideoMimeType(photo.mimeType) && <span className="play-badge"><Play size={19} fill="currentColor" /></span>}
-                    <span className="expand"><Maximize2 size={16} /></span>
+                    {editMode
+                      ? <span className="selection-mark">{selectedPhotoSet.has(photo.id) && <Check size={17} strokeWidth={3} />}</span>
+                      : <span className="expand"><Maximize2 size={16} /></span>}
                   </button>
                   <div className="photo-meta">
                     <div>
                       <strong title={photo.name}>{photo.name}</strong>
                       <span>{formatSize(photo.size)} · {formatDate(photo.createdAt)}</span>
+                      <span className="media-operator">{operationLabel(photo)}{photo.lastActionAt ? ` · ${formatDate(photo.lastActionAt)}` : ""}</span>
+                      {showRecycleBin && photo.purgeAt && <span className="purge-date">{formatDate(photo.purgeAt)} 后永久删除</span>}
                     </div>
-                    <div className="photo-actions">
-                      {isAdmin && (
+                    {!editMode && <div className="photo-actions">
+                      {isAdmin && !showRecycleBin && (
                         <>
                           <button className="icon-button" onClick={() => openRename(photo)} title="重命名" aria-label={`重命名 ${photo.name}`}><Pencil size={16} /></button>
                           <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title={`删除${mediaLabel(photo)}`} aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
@@ -886,7 +1122,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                       <a className="icon-button" href={downloadUrl(photo.url, photo.name)} onClick={() => logMediaAccess(photo, "media.download")} title="下载原文件" aria-label={`下载 ${photo.name}`}>
                         <Download size={17} />
                       </a>
-                    </div>
+                    </div>}
                   </div>
                 </article>
               ))}
@@ -898,9 +1134,9 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 <span><Images size={32} /></span>
                 <span><ImageIcon size={25} /></span>
               </div>
-              <h2>{selectedFolder ? "这个文件夹还是空的" : "还没有影像"}</h2>
-              <p>{selectedFolder ? "添加第一批照片或视频，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片与视频。"}</p>
-              {(canUpload || isAdmin) && (
+              <h2>{showRecycleBin ? "回收站是空的" : selectedFolder ? "这个文件夹还是空的" : "还没有影像"}</h2>
+              <p>{showRecycleBin ? "删除的影像会在这里保留 7 天。" : selectedFolder ? "添加第一批照片或视频，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片与视频。"}</p>
+              {!showRecycleBin && (canUpload || isAdmin) && (
                 <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : setNewFolderOpen(true)}>
                   {canUpload ? <Upload size={18} /> : <Plus size={18} />}
                   {canUpload ? "上传影像" : "新建文件夹"}
@@ -1114,14 +1350,56 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         <div className="modal-backdrop" onMouseDown={() => !savingPhoto && setDeletingPhoto(null)}>
           <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="delete-photo-title">
             <div className="dialog-heading">
-              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-photo-title">删除{mediaLabel(deletingPhoto)}</h2></div>
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-photo-title">移入回收站</h2></div>
               <button className="icon-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)} aria-label="关闭"><X size={18} /></button>
             </div>
-            <p className="dialog-message">确定删除「{deletingPhoto.name}」吗？原文件和相册记录都会被永久删除，无法恢复。</p>
+            <p className="dialog-message">确定将「{deletingPhoto.name}」移入回收站吗？影像会保留 7 天，期间可以恢复。</p>
             <div className="dialog-actions">
               <button className="secondary-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)}>取消</button>
               <button className="danger-button" disabled={savingPhoto} onClick={() => void deletePhoto()}>
-                {savingPhoto ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} 删除
+                {savingPhoto ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} 移入回收站
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {batchMoveOpen && (
+        <div className="modal-backdrop" onMouseDown={() => !batchSaving && setBatchMoveOpen(false)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="batch-move-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon"><FolderOpen size={19} /></span><h2 id="batch-move-title">移动 {selectedPhotoIds.length} 项影像</h2></div>
+              <button className="icon-button" disabled={batchSaving} onClick={() => setBatchMoveOpen(false)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <p className="dialog-message security-message">选择目标文件夹，照片和视频会保留原名称与拍摄信息。</p>
+            <label className="field-label" htmlFor="batch-target-folder">目标文件夹</label>
+            <select id="batch-target-folder" className="text-input folder-select" value={batchTargetFolder} disabled={batchSaving} onChange={(event) => setBatchTargetFolder(event.target.value)}>
+              {moveTargets.map((folder) => <option key={folder.id} value={folder.slug}>{folder.name}{folder.locked ? "（已加密）" : ""}</option>)}
+            </select>
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={batchSaving} onClick={() => setBatchMoveOpen(false)}>取消</button>
+              <button className="primary-button" disabled={!batchTargetFolder || batchSaving} onClick={() => void moveSelectedPhotos()}>
+                {batchSaving ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />} 确认移动
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {batchDeleteOpen && (
+        <div className="modal-backdrop" onMouseDown={() => !batchSaving && setBatchDeleteOpen(false)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="batch-delete-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="batch-delete-title">{showRecycleBin ? "永久删除影像" : "移入回收站"}</h2></div>
+              <button className="icon-button" disabled={batchSaving} onClick={() => setBatchDeleteOpen(false)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <p className="dialog-message">{showRecycleBin
+              ? `确定永久删除已选择的 ${selectedPhotoIds.length} 项影像吗？云存储原文件会被删除，无法恢复。`
+              : `确定将已选择的 ${selectedPhotoIds.length} 项影像移入回收站吗？影像会保留 7 天。`}</p>
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={batchSaving} onClick={() => setBatchDeleteOpen(false)}>取消</button>
+              <button className="danger-button" disabled={batchSaving} onClick={() => void (showRecycleBin ? purgeSelectedPhotos() : deleteSelectedPhotos())}>
+                {batchSaving ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} {showRecycleBin ? "永久删除" : "移入回收站"} {selectedPhotoIds.length} 项
               </button>
             </div>
           </section>
@@ -1136,7 +1414,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <span>{formatSize(preview.size)}{preview.width ? ` · ${preview.width} × ${preview.height}` : ""}</span>
             </div>
             <div>
-              {isAdmin && (
+              {isAdmin && !showRecycleBin && (
                 <>
                   <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label={`重命名${mediaLabel(preview)}`}><Pencil size={17} /></button>
                   <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title={`删除${mediaLabel(preview)}`} aria-label={`删除${mediaLabel(preview)}`}><Trash2 size={17} /></button>

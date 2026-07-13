@@ -91,6 +91,7 @@ export async function PATCH(request: Request) {
     }
 
     await confirmUploadedFile(ticket.fileId, ticket.size);
+    const createdAt = new Date().toISOString();
     const photo: AlbumPhoto = {
       id: ticket.id,
       folderSlug: ticket.folderSlug,
@@ -102,7 +103,10 @@ export async function PATCH(request: Request) {
       mimeType: ticket.mimeType,
       width: ticket.width,
       height: ticket.height,
-      createdAt: new Date().toISOString(),
+      createdAt,
+      lastAction: "upload",
+      lastActionBy: user.displayName,
+      lastActionAt: createdAt,
     };
     await createPhotoRecord(photo);
     const [url] = await resolvePhotoUrls([photo.fileId]);

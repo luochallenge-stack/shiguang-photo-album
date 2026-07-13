@@ -1,4 +1,4 @@
-<view class="library-page safe-bottom">
+<view class="library-page safe-bottom {{editMode ? 'editing' : ''}}">
   <view class="member-bar">
     <view class="identity">
       <image class="logo" src="/images/logo.png" mode="aspectFill" />
@@ -12,16 +12,17 @@
 
   <scroll-view class="folder-strip" scroll-x enhanced show-scrollbar="{{false}}">
     <view class="folder-list">
-      <button class="folder-chip {{selectedFolder === '' ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">全部</button>
+      <button class="folder-chip {{selectedFolder === '' && !recycleMode ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">全部</button>
       <button
         wx:for="{{folders}}"
         wx:key="id"
-        class="folder-chip {{selectedFolder === item.slug ? 'active' : ''}}"
+        class="folder-chip {{selectedFolder === item.slug && !recycleMode ? 'active' : ''}}"
         data-slug="{{item.slug}}"
         bindtap="chooseFolder"
       >
         {{item.name}}<text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
       </button>
+      <button wx:if="{{user.role === 'admin'}}" class="folder-chip recycle-chip {{recycleMode ? 'active' : ''}}" bindtap="chooseRecycleBin">回收站 {{recycleCount}}</button>
     </view>
   </scroll-view>
 
@@ -30,8 +31,13 @@
       <text class="folder-title">{{selectedFolderName}}</text>
       <text class="photo-count">{{total}} 项影像</text>
     </view>
-    <button wx:if="{{user.role === 'admin'}}" class="upload-button" bindtap="chooseImages" disabled="{{uploading}}">＋ 上传</button>
+    <view wx:if="{{user.role === 'admin'}}" class="heading-actions">
+      <button class="edit-button {{editMode ? 'active' : ''}}" bindtap="toggleEditMode" disabled="{{uploading || batchSaving || photos.length === 0}}">{{editMode ? '完成' : '编辑'}}</button>
+      <button wx:if="{{!editMode && !recycleMode}}" class="upload-button" bindtap="chooseImages" disabled="{{uploading}}">＋ 上传</button>
+    </view>
   </view>
+
+  <view class="recycle-notice" wx:if="{{recycleMode}}">回收站中的影像保留 7 天，到期后自动永久删除。</view>
 
   <view class="skeleton-grid" wx:if="{{loading}}">
     <view class="skeleton-item" wx:for="{{skeletons}}" wx:key="*this">
@@ -45,26 +51,44 @@
     <button bindtap="retry">重新加载</button>
   </view>
   <view class="empty-state" wx:elif="{{photos.length === 0}}">
-    <text class="empty-title">这里还没有影像</text>
-    <text class="empty-copy">{{user.role === 'admin' ? '点击上传，添加第一张照片。' : '管理员上传后，这里就会出现新的影像。'}}</text>
+    <text class="empty-title">{{recycleMode ? '回收站是空的' : '这里还没有影像'}}</text>
+    <text class="empty-copy">{{recycleMode ? '删除的影像会在这里保留 7 天。' : user.role === 'admin' ? '点击上传，添加第一张照片。' : '管理员上传后，这里就会出现新的影像。'}}</text>
   </view>
   <view class="media-grid" wx:else>
-    <view class="media-item" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
+    <view class="media-item {{item.selected ? 'selected' : ''}}" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
       <view class="media-preview">
         <image wx:if="{{!item.video}}" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load data-id="{{item.id}}" binderror="thumbnailError" />
         <view wx:else class="video-placeholder">
           <view class="play-button"><view class="play-triangle" /></view>
           <text>视频</text>
         </view>
+        <view wx:if="{{editMode}}" class="media-select {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</view>
       </view>
       <view class="media-copy">
         <text class="media-name">{{item.name}}</text>
         <text class="media-meta">{{item.dateLabel}} · {{item.sizeLabel}}</text>
+        <text class="media-operator">{{item.operatorLabel}}{{item.operatorDateLabel ? ' · ' + item.operatorDateLabel : ''}}</text>
+        <text wx:if="{{recycleMode && item.purgeDateLabel}}" class="purge-date">{{item.purgeDateLabel}} 后永久删除</text>
       </view>
     </view>
   </view>
   <view class="load-more" wx:if="{{loadingMore}}">正在加载更多</view>
   <view class="load-more" wx:elif="{{photos.length > 0 && !hasMore}}">已经看到全部影像</view>
+
+  <view class="batch-toolbar" wx:if="{{editMode}}">
+    <view class="batch-summary">
+      <button bindtap="toggleAllLoaded">{{allLoadedSelected ? '取消全选' : photos.length > 100 ? '选择前100项' : '全选已加载'}}</button>
+      <text>已选择 {{batchSelectedCount}} 项</text>
+    </view>
+    <view class="batch-actions" wx:if="{{recycleMode}}">
+      <button class="batch-move" bindtap="restoreSelectedMedia" disabled="{{!batchSelectedCount || batchSaving}}" loading="{{batchSaving}}">恢复</button>
+      <button class="batch-delete" bindtap="confirmPermanentDelete" disabled="{{!batchSelectedCount || batchSaving}}">永久删除</button>
+    </view>
+    <view class="batch-actions" wx:else>
+      <button class="batch-move" bindtap="openBatchMove" disabled="{{!batchSelectedCount || batchSaving}}">移动到</button>
+      <button class="batch-delete" bindtap="confirmBatchDelete" disabled="{{!batchSelectedCount || batchSaving}}">移入回收站</button>
+    </view>
+  </view>
 
   <view class="modal-backdrop" wx:if="{{unlockOpen}}" bindtap="closeUnlock">
     <view class="unlock-dialog" catchtap="noop">
@@ -98,6 +122,21 @@
         >上传 {{selectedCount}} 张</button>
       </view>
       <button class="selection-cancel" bindtap="cancelImageSelection" disabled="{{selectingImages}}">取消本次选择</button>
+    </view>
+  </view>
+
+  <view class="selection-backdrop" wx:if="{{batchMoveOpen}}" bindtap="closeBatchMove">
+    <view class="selection-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">批量移动</text>
+      <text class="dialog-title">移动 {{batchSelectedCount}} 项影像</text>
+      <text class="dialog-copy">选择目标文件夹，原名称和影像信息会保留。</text>
+      <picker mode="selector" range="{{moveFolderNames}}" value="{{moveFolderIndex}}" bindchange="updateMoveFolder">
+        <view class="folder-picker">{{moveFolderNames[moveFolderIndex] || '请选择目标文件夹'}}</view>
+      </picker>
+      <view class="dialog-actions">
+        <button class="cancel-button" bindtap="closeBatchMove" disabled="{{batchSaving}}">取消</button>
+        <button class="unlock-button" bindtap="moveSelectedMedia" disabled="{{batchSaving}}" loading="{{batchSaving}}">确认移动</button>
+      </view>
     </view>
   </view>
 

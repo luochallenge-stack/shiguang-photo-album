@@ -59,7 +59,7 @@
 | 集合 | 类型 | 用途 |
 | --- | --- | --- |
 | `album_folders` | `AlbumFolder` | 文件夹名称、slug、创建时间和可选密码摘要 |
-| `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、对象路径和所属文件夹 |
+| `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、所属文件夹、回收站时间和最近操作人 |
 | `album_upload_tokens` | `UploadTokenRecord` | 每个文件夹当前有效的上传链接令牌摘要 |
 | `album_users` | `AlbumUser` | 本地账号、角色、状态和密码摘要 |
 | `album_audit_logs` | `AlbumAuditLog` | 登录、浏览和修改操作日志 |
@@ -70,6 +70,8 @@
 - `photo.fileId` 是生成临时访问地址、查询文件和删除文件的权威标识。
 - `photo.objectKey` 是云存储中的对象路径，格式为 `albums/{folderSlug}/{时间戳}-{随机值}-{文件名}`。
 - `photo.url` 不是永久公开地址。读取列表和播放前应通过 `resolvePhotoUrls` 生成临时地址。
+- `photo.deletedAt` 和 `photo.purgeAt` 表示回收站状态；正常列表必须排除 `deletedAt` 非空的记录。
+- `photo.lastAction`、`lastActionBy`、`lastActionAt` 用于双端就近展示最近操作者；完整历史仍以 `album_audit_logs` 为准。
 - `passwordHash` 和 `tokenHash` 只保存摘要，不保存文件夹密码或上传令牌明文。
 
 当前查询上限：文件夹 100 个、影像 300 项、用户 200 个、日志最多 300 条。扩大规模时必须先改为数据库级分页，不能只提高前端分页数字。
@@ -81,7 +83,7 @@
 用户角色只有：
 
 - `member`：默认注册角色，可浏览未加密内容；正确解锁后可浏览加密文件夹。
-- `admin`：可浏览所有文件夹，并执行创建、上传、加密、重命名、删除、用户授权和日志查看。
+- `admin`：可浏览所有文件夹和回收站，并执行创建、上传、加密、重命名、批量移动、恢复、永久删除、用户授权和日志查看。
 
 用户状态只有 `active` 和 `disabled`。`disabled` 用户即使持有未过期令牌也无法继续通过 `currentUser`。
 
@@ -197,14 +199,24 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `POST /api/photos/upload` | admin/上传令牌 | 生成 Web 直传信息和票据 |
 | `PATCH /api/photos/upload` | admin/上传令牌 | 确认 Web 直传并登记媒体 |
 | `POST /api/photos` | admin/上传令牌 | multipart 上传，当前供小程序图片使用 |
-| `PATCH/DELETE /api/photos` | admin | 重命名或永久删除媒体 |
+| `PATCH/DELETE /api/photos` | admin | 重命名单项媒体，或将其移入回收站 |
+| `PATCH/DELETE /api/photos/batch` | admin | 批量移动，或将最多 100 项影像移入回收站 |
+| `PATCH/DELETE /api/photos/recycle` | admin | 批量恢复，或立即永久删除回收站影像 |
 | `GET /api/photos/url` | 文件夹可读 | 刷新图片或视频临时地址 |
 | `POST /api/audit` | 登录 | 记录客户端预览或下载事件 |
 | `GET/PATCH /api/admin/users` | admin | 用户列表、角色和状态管理 |
 | `GET /api/admin/audit-logs` | admin | 审计日志列表 |
 | `POST /api/admin/verify` | admin | 简单管理员身份检查 |
 
-Route Handler 的基本顺序应保持为：认证、角色或资源权限、输入校验、领域操作、审计、响应。不能只依赖界面隐藏按钮实现授权。
+`DELETE /api/photos` 现在是软删除，不再立即删除云文件。Route Handler 的基本顺序应保持为：认证、角色或资源权限、输入校验、领域操作、审计、响应。不能只依赖界面隐藏按钮实现授权。
+
+### 回收站与操作人
+
+- 普通删除只写入 `deletedAt`、`purgeAt` 和最近操作人，保留期固定为 7 天。
+- `/api/library?recycle=1` 仅管理员可用，双端回收站从这里读取内容。
+- 回收站支持批量恢复和立即永久删除；永久删除才调用 CloudBase `deleteFile` 并删除数据库记录。
+- 每次读取 `/api/library` 会调用 `purgeExpiredPhotos` 清理已经到期的影像；因此在线使用时会自动清理，服务完全无流量时会推迟到下一次访问。
+- 上传、重命名、移动、移入回收站和恢复都必须更新 `lastAction*` 字段；批量操作仍要逐张写审计记录。
 
 ## 9. 审计日志
 
@@ -234,7 +246,7 @@ Route Handler 的基本顺序应保持为：认证、角色或资源权限、输
 - 文件夹导航、全部影像、搜索、网格/列表视图。
 - 新建文件夹、上传、拖放、进度和上传链接。
 - 文件夹解锁、设置密码和移除密码。
-- 图片/视频在线播放、下载、重命名和永久删除。
+- 图片/视频在线播放、下载、重命名、编辑模式、批量移动和 7 天回收站。
 - 管理员用户授权和审计日志 Tab。
 - 旧 CloudBase Run 域名到正式域名的客户端跳转。
 
@@ -271,6 +283,8 @@ Route Handler 的基本顺序应保持为：认证、角色或资源权限、输
 - 图片使用缩略图和 lazy-load，失败时回退原图。
 - 加密文件夹访问令牌按 slug 保存。
 - 普通成员只读；管理员选择具体文件夹后可创建最多 50 张图片的上传任务。
+- 管理员编辑模式单次最多选择 100 项，支持批量移动和移入回收站。
+- 管理员回收站支持批量恢复和永久删除；影像卡片显示最近操作者。
 - 不允许在“全部影像”直接上传，因为服务端需要明确目标 folderSlug。
 
 ### `pages/viewer`
@@ -363,7 +377,7 @@ https://7061-paratrooper-battalion-d1b3b82e83-1313194650.tcb.qcloud.la
 - 数据库查询最多返回 300 项影像。小程序虽然分页，但服务端目前先读取 300 项再切片。
 - Web 仍一次读取当前可见影像，没有真正的数据库游标分页。
 - 解锁失败限流存在单进程内存，不能跨实例共享。
-- 小程序只支持管理员上传图片，不支持视频、删除、重命名、文件夹管理和用户管理。
+- 小程序支持管理员批量移动、回收站和图片上传，但仍不支持视频上传、单项重命名、文件夹管理和用户管理。
 - 小程序 multipart 上传经过应用服务器，不适合大文件。
 - 云存储写入/删除与数据库记录不是事务操作；中途失败可能产生孤立对象或孤立记录，批量导入前应设计补偿和对账。
 - `album-client.tsx` 体积较大，复杂迭代前可渐进拆分。

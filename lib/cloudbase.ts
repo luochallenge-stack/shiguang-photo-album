@@ -20,6 +20,11 @@ export type AlbumPhoto = {
   width: number | null;
   height: number | null;
   createdAt: string;
+  deletedAt?: string;
+  purgeAt?: string;
+  lastAction?: "upload" | "rename" | "move" | "recycle" | "restore";
+  lastActionBy?: string;
+  lastActionAt?: string;
 };
 
 export type AlbumUserRole = "admin" | "member";
@@ -130,7 +135,14 @@ export async function listPhotos(folderSlug?: string): Promise<AlbumPhoto[]> {
   const collection = database().collection(COLLECTIONS.photos);
   const query = folderSlug ? collection.where({ folderSlug }) : collection;
   const result = await query.orderBy("createdAt", "desc").limit(300).get();
-  return rows<AlbumPhoto>(result);
+  return rows<AlbumPhoto>(result).filter((photo) => !photo.deletedAt);
+}
+
+export async function listRecycledPhotos(): Promise<AlbumPhoto[]> {
+  const result = await database().collection(COLLECTIONS.photos).orderBy("createdAt", "desc").limit(300).get();
+  return rows<AlbumPhoto>(result)
+    .filter((photo) => Boolean(photo.deletedAt))
+    .sort((left, right) => String(right.deletedAt).localeCompare(String(left.deletedAt)));
 }
 
 export async function createPhotoRecord(photo: AlbumPhoto): Promise<void> {
@@ -142,8 +154,32 @@ export async function findPhoto(id: string): Promise<AlbumPhoto | null> {
   return rows<AlbumPhoto>(result)[0] || null;
 }
 
-export async function renamePhotoRecord(id: string, name: string): Promise<void> {
-  await database().collection(COLLECTIONS.photos).doc(id).update({ name });
+function operationFields(action: NonNullable<AlbumPhoto["lastAction"]>, actorName: string, at = new Date().toISOString()) {
+  return { lastAction: action, lastActionBy: actorName.slice(0, 120), lastActionAt: at };
+}
+
+export async function renamePhotoRecord(id: string, name: string, actorName: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({ name, ...operationFields("rename", actorName) });
+}
+
+export async function movePhotoRecord(id: string, folderSlug: string, actorName: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({ folderSlug, ...operationFields("move", actorName) });
+}
+
+export async function recyclePhotoRecord(id: string, deletedAt: string, purgeAt: string, actorName: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({
+    deletedAt,
+    purgeAt,
+    ...operationFields("recycle", actorName, deletedAt),
+  });
+}
+
+export async function restorePhotoRecord(id: string, actorName: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({
+    deletedAt: "",
+    purgeAt: "",
+    ...operationFields("restore", actorName),
+  });
 }
 
 export async function deletePhotoRecord(id: string): Promise<void> {
@@ -246,10 +282,26 @@ export async function confirmUploadedFile(fileId: string, expectedSize: number):
   }
 }
 
+export async function deletePhotoFiles(fileIds: string[]): Promise<void> {
+  for (let index = 0; index < fileIds.length; index += 50) {
+    const result = await getCloudBase().deleteFile({ fileList: fileIds.slice(index, index + 50) });
+    const failure = result.fileList?.find((item) => item.code !== "SUCCESS" && item.code !== "STORAGE_FILE_NONEXIST");
+    if (failure) throw new Error(`腾讯云存储删除失败：${failure.code}`);
+  }
+}
+
 export async function deletePhotoFile(fileId: string): Promise<void> {
-  const result = await getCloudBase().deleteFile({ fileList: [fileId] });
-  const failure = result.fileList?.find((item) => item.code !== "SUCCESS" && item.code !== "STORAGE_FILE_NONEXIST");
-  if (failure) throw new Error(`腾讯云存储删除失败：${failure.code}`);
+  await deletePhotoFiles([fileId]);
+}
+
+export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {
+  const expired = (await listRecycledPhotos())
+    .filter((photo) => photo.purgeAt && new Date(photo.purgeAt).getTime() <= now)
+    .slice(0, 50);
+  if (!expired.length) return 0;
+  await deletePhotoFiles(expired.map((photo) => photo.fileId));
+  await Promise.all(expired.map((photo) => deletePhotoRecord(photo.id)));
+  return expired.length;
 }
 
 export async function resolvePhotoUrls(fileIds: string[], maxAge = 600): Promise<string[]> {
