@@ -16,6 +16,8 @@ test("builds the finished photo album surface", async () => {
   assert.match(page, /api\/folders/);
   assert.match(page, /管理相册/);
   assert.match(page, /api\/folders\/share/);
+  assert.match(page, /重命名照片/);
+  assert.match(page, /删除照片/);
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape/);
 });
 
@@ -28,6 +30,7 @@ test("keeps CloudBase credentials server-side", async () => {
   assert.match(page, /api\/photos/);
   assert.doesNotMatch(page, /CLOUDBASE_APIKEY/);
   assert.match(cloudbase, /CLOUDBASE_ENV_ID/);
+  assert.match(cloudbase, /deleteFile/);
   assert.match(exampleEnv, /CLOUDBASE_APIKEY/);
   assert.match(exampleEnv, /ALBUM_ADMIN_KEY/);
 });

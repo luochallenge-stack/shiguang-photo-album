@@ -16,10 +16,12 @@ import {
   KeyRound,
   LoaderCircle,
   Maximize2,
+  Pencil,
   Plus,
   Search,
   Share2,
   ShieldCheck,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -182,6 +184,10 @@ export default function Home() {
   const [verifyingAdmin, setVerifyingAdmin] = useState(false);
   const [sharedFolder, setSharedFolder] = useState("");
   const [sharedUploadToken, setSharedUploadToken] = useState("");
+  const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
+  const [savingPhoto, setSavingPhoto] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
@@ -221,16 +227,19 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get("folder") || "";
     const uploadToken = params.get("upload") || "";
-    if (fromUrl) setSelectedFolder(fromUrl);
-    if (fromUrl && uploadToken) {
-      setSharedFolder(fromUrl);
-      setSharedUploadToken(uploadToken);
-    }
-    const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
-    if (savedAdminKey) {
-      void verifyAdminKey(savedAdminKey, false).catch(() => sessionStorage.removeItem("album-admin-key"));
-    }
-    void loadLibrary(fromUrl);
+    const initialize = window.setTimeout(() => {
+      if (fromUrl) setSelectedFolder(fromUrl);
+      if (fromUrl && uploadToken) {
+        setSharedFolder(fromUrl);
+        setSharedUploadToken(uploadToken);
+      }
+      const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
+      if (savedAdminKey) {
+        void verifyAdminKey(savedAdminKey, false).catch(() => sessionStorage.removeItem("album-admin-key"));
+      }
+      void loadLibrary(fromUrl);
+    }, 0);
+    return () => window.clearTimeout(initialize);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeFolder = folders.find((folder) => folder.slug === selectedFolder);
@@ -388,6 +397,62 @@ export default function Home() {
     setIsAdmin(false);
   };
 
+  const openRename = (photo: PhotoItem) => {
+    setEditingPhoto(photo);
+    setEditingName(photo.name);
+  };
+
+  const renamePhoto = async () => {
+    const name = editingName.trim();
+    if (!editingPhoto || !name) return;
+    setSavingPhoto(true);
+    setError("");
+    try {
+      const result = await readJson<{ photo: PhotoItem }>(
+        await fetch("/api/photos", {
+          method: "PATCH",
+          headers: adminHeaders(true),
+          body: JSON.stringify({ id: editingPhoto.id, name }),
+        }),
+      );
+      setPhotos((current) => current.map((photo) => (photo.id === result.photo.id ? { ...photo, name: result.photo.name } : photo)));
+      setPreview((current) => current?.id === result.photo.id ? { ...current, name: result.photo.name } : current);
+      setEditingPhoto(null);
+      setEditingName("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "重命名照片失败");
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+
+  const deletePhoto = async () => {
+    if (!deletingPhoto) return;
+    setSavingPhoto(true);
+    setError("");
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch(`/api/photos?id=${encodeURIComponent(deletingPhoto.id)}`, {
+          method: "DELETE",
+          headers: adminHeaders(),
+        }),
+      );
+      const deletedId = deletingPhoto.id;
+      setPhotos((current) => current.filter((photo) => photo.id !== deletedId));
+      setFolders((current) => current.map((folder) => (
+        folder.slug === deletingPhoto.folderSlug
+          ? { ...folder, photoCount: Math.max(0, folder.photoCount - 1) }
+          : folder
+      )));
+      setPreview((current) => current?.id === deletedId ? null : current);
+      setDeletingPhoto(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "删除照片失败");
+    } finally {
+      setSavingPhoto(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -532,9 +597,17 @@ export default function Home() {
                       <strong title={photo.name}>{photo.name}</strong>
                       <span>{formatSize(photo.size)} · {formatDate(photo.createdAt)}</span>
                     </div>
-                    <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原图" aria-label={`下载 ${photo.name}`}>
-                      <Download size={17} />
-                    </a>
+                    <div className="photo-actions">
+                      {isAdmin && (
+                        <>
+                          <button className="icon-button" onClick={() => openRename(photo)} title="重命名" aria-label={`重命名 ${photo.name}`}><Pencil size={16} /></button>
+                          <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title="删除照片" aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
+                        </>
+                      )}
+                      <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原图" aria-label={`下载 ${photo.name}`}>
+                        <Download size={17} />
+                      </a>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -619,6 +692,43 @@ export default function Home() {
         </div>
       )}
 
+      {editingPhoto && (
+        <div className="modal-backdrop" onMouseDown={() => !savingPhoto && setEditingPhoto(null)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="rename-photo-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon"><Pencil size={19} /></span><h2 id="rename-photo-title">重命名照片</h2></div>
+              <button className="icon-button" disabled={savingPhoto} onClick={() => setEditingPhoto(null)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <label className="field-label" htmlFor="photo-name">照片名称</label>
+            <input id="photo-name" className="text-input" autoFocus maxLength={180} value={editingName} onChange={(event) => setEditingName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void renamePhoto(); }} />
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={savingPhoto} onClick={() => setEditingPhoto(null)}>取消</button>
+              <button className="primary-button" disabled={!editingName.trim() || savingPhoto} onClick={() => void renamePhoto()}>
+                {savingPhoto ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} 保存
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {deletingPhoto && (
+        <div className="modal-backdrop" onMouseDown={() => !savingPhoto && setDeletingPhoto(null)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="delete-photo-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-photo-title">删除照片</h2></div>
+              <button className="icon-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <p className="dialog-message">确定删除「{deletingPhoto.name}」吗？原图和相册记录都会被永久删除，无法恢复。</p>
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={savingPhoto} onClick={() => setDeletingPhoto(null)}>取消</button>
+              <button className="danger-button" disabled={savingPhoto} onClick={() => void deletePhoto()}>
+                {savingPhoto ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} 删除
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {preview && (
         <div className="preview-overlay" role="dialog" aria-modal="true" aria-label={preview.name}>
           <div className="preview-toolbar">
@@ -627,6 +737,12 @@ export default function Home() {
               <span>{formatSize(preview.size)}{preview.width ? ` · ${preview.width} × ${preview.height}` : ""}</span>
             </div>
             <div>
+              {isAdmin && (
+                <>
+                  <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label="重命名照片"><Pencil size={17} /></button>
+                  <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title="删除照片" aria-label="删除照片"><Trash2 size={17} /></button>
+                </>
+              )}
               <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制原图链接" aria-label="复制原图链接"><Clipboard size={18} /></button>
               <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} title="下载原图" aria-label="下载原图"><Download size={18} /></a>
               <button className="icon-button dark" onClick={() => setPreview(null)} title="关闭" aria-label="关闭预览"><X size={20} /></button>

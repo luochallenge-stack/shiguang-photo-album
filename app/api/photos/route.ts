@@ -1,5 +1,14 @@
-import { createObjectKey, createPhotoRecord, findFolder, uploadPhoto } from "../../../lib/cloudbase";
-import { canWriteFolder, unauthorized } from "../../../lib/access";
+import {
+  createObjectKey,
+  createPhotoRecord,
+  deletePhotoFile,
+  deletePhotoRecord,
+  findFolder,
+  findPhoto,
+  renamePhotoRecord,
+  uploadPhoto,
+} from "../../../lib/cloudbase";
+import { canWriteFolder, isAdminRequest, unauthorized } from "../../../lib/access";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]);
 
@@ -41,6 +50,42 @@ export async function POST(request: Request) {
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存图片信息失败";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    if (!isAdminRequest(request)) return unauthorized();
+    const body = (await request.json()) as { id?: unknown; name?: unknown };
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!id || !name) return Response.json({ error: "照片名称不能为空" }, { status: 400 });
+    if (name.length > 180) return Response.json({ error: "照片名称不能超过 180 个字符" }, { status: 400 });
+
+    const photo = await findPhoto(id);
+    if (!photo) return Response.json({ error: "照片不存在" }, { status: 404 });
+    await renamePhotoRecord(id, name);
+    return Response.json({ photo: { ...photo, name } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "重命名照片失败";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    if (!isAdminRequest(request)) return unauthorized();
+    const id = new URL(request.url).searchParams.get("id")?.trim() || "";
+    if (!id) return Response.json({ error: "缺少照片标识" }, { status: 400 });
+
+    const photo = await findPhoto(id);
+    if (!photo) return Response.json({ error: "照片不存在" }, { status: 404 });
+    await deletePhotoFile(photo.fileId);
+    await deletePhotoRecord(id);
+    return Response.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "删除照片失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }

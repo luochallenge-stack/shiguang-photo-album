@@ -61,8 +61,9 @@ function rows<T>(result: { data?: unknown[] }): T[] {
   return (result.data || []).map((item) => {
     const source = item as { data?: unknown };
     const record = (source.data && typeof source.data === "object" ? source.data : item) as T & { _id?: string };
-    const { _id: _ignored, ...value } = record as T & { _id?: string };
-    return value as T;
+    const value = { ...record } as T & { _id?: string };
+    delete value._id;
+    return value;
   });
 }
 
@@ -91,6 +92,19 @@ export async function listPhotos(folderSlug?: string): Promise<AlbumPhoto[]> {
 
 export async function createPhotoRecord(photo: AlbumPhoto): Promise<void> {
   await database().collection(COLLECTIONS.photos).doc(photo.id).set(photo);
+}
+
+export async function findPhoto(id: string): Promise<AlbumPhoto | null> {
+  const result = await database().collection(COLLECTIONS.photos).doc(id).get();
+  return rows<AlbumPhoto>(result)[0] || null;
+}
+
+export async function renamePhotoRecord(id: string, name: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({ name });
+}
+
+export async function deletePhotoRecord(id: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).remove();
 }
 
 export async function getUploadTokenRecord(folderSlug: string): Promise<UploadTokenRecord | null> {
@@ -122,6 +136,12 @@ export async function uploadPhoto(objectKey: string, contents: Buffer): Promise<
   if (!uploaded.fileID) throw new Error("腾讯云存储没有返回文件标识");
   const [resolved] = await resolvePhotoUrls([uploaded.fileID]);
   return { fileId: uploaded.fileID, url: resolved || uploaded.fileID };
+}
+
+export async function deletePhotoFile(fileId: string): Promise<void> {
+  const result = await getCloudBase().deleteFile({ fileList: [fileId] });
+  const failure = result.fileList?.find((item) => item.code !== "SUCCESS" && item.code !== "STORAGE_FILE_NONEXIST");
+  if (failure) throw new Error(`腾讯云存储删除失败：${failure.code}`);
 }
 
 export async function resolvePhotoUrls(fileIds: string[]): Promise<string[]> {
