@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   Check,
   ChevronRight,
   Clipboard,
@@ -17,6 +18,7 @@ import {
   LockKeyhole,
   LockOpen,
   LoaderCircle,
+  LogOut,
   Maximize2,
   Pencil,
   Play,
@@ -26,11 +28,15 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  UserRound,
+  Users,
   Video,
   X,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
+import type { PublicAlbumUser } from "@/lib/auth";
+import type { AlbumAuditLog } from "@/lib/cloudbase";
 
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
@@ -72,6 +78,8 @@ type LibraryResponse = {
   folderLocked: boolean;
 };
 
+type AdminSection = "users" | "logs";
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "请求失败");
@@ -93,6 +101,42 @@ function formatDate(value: string): string {
     minute: "2-digit",
   }).format(new Date(value));
 }
+
+function formatFullDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+function providerLabel(provider: PublicAlbumUser["provider"]): string {
+  return provider === "wechat" ? "微信" : provider === "qq" ? "QQ" : "管理员";
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  "auth.login": "登录相册",
+  "auth.logout": "退出登录",
+  "album.view": "访问相册",
+  "media.view": "预览影像",
+  "media.download": "下载影像",
+  "media.upload": "上传影像",
+  "media.rename": "重命名影像",
+  "media.delete": "删除影像",
+  "folder.create": "创建文件夹",
+  "folder.unlock": "解锁文件夹",
+  "folder.unlock.failed": "解锁失败",
+  "folder.password.set": "加密文件夹",
+  "folder.password.change": "更换文件夹密码",
+  "folder.password.remove": "移除文件夹密码",
+  "folder.share.create": "生成上传链接",
+  "user.access.update": "修改用户权限",
+  "admin.users.view": "查看用户管理",
+  "admin.logs.view": "查看操作日志",
+};
 
 function downloadUrl(url: string, filename: string): string {
   const separator = url.includes("?") ? "&" : "?";
@@ -173,12 +217,10 @@ async function uploadToCloudBase(
   uploadToken: string,
   file: File,
   dimensions: { width: number | null; height: number | null },
-  adminKey: string,
   onProgress: (progress: number) => void,
 ): Promise<void> {
   const authHeaders = {
     "content-type": "application/json",
-    ...(adminKey ? { "x-album-admin-key": adminKey } : {}),
   };
   const prepared = await readJson<DirectUploadResponse>(
     await fetch("/api/photos/upload", {
@@ -224,7 +266,7 @@ function mediaLabel(photo: PhotoItem): "照片" | "视频" {
   return isVideoMimeType(photo.mimeType) ? "视频" : "照片";
 }
 
-export default function Home() {
+export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
@@ -241,11 +283,11 @@ export default function Home() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [copied, setCopied] = useState(false);
   const [copiedUpload, setCopiedUpload] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [adminInput, setAdminInput] = useState("");
-  const [adminKey, setAdminKey] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [verifyingAdmin, setVerifyingAdmin] = useState(false);
+  const [activeView, setActiveView] = useState<"album" | "admin">("album");
+  const [adminSection, setAdminSection] = useState<AdminSection>("users");
+  const [managedUsers, setManagedUsers] = useState<PublicAlbumUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AlbumAuditLog[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
   const [sharedFolder, setSharedFolder] = useState("");
   const [sharedUploadToken, setSharedUploadToken] = useState("");
   const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
@@ -259,32 +301,18 @@ export default function Home() {
   const [securityPassword, setSecurityPassword] = useState("");
   const [savingSecurity, setSavingSecurity] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const isAdmin = initialUser.role === "admin";
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
     ...(contentType ? { "content-type": "application/json" } : {}),
-    ...(adminKey ? { "x-album-admin-key": adminKey } : {}),
   });
 
-  const verifyAdminKey = async (candidate: string, remember = true) => {
-    await readJson<{ ok: boolean }>(
-      await fetch("/api/admin/verify", {
-        method: "POST",
-        headers: { "x-album-admin-key": candidate },
-      }),
-    );
-    setAdminKey(candidate);
-    setIsAdmin(true);
-    if (remember) sessionStorage.setItem("album-admin-key", candidate);
-  };
-
-  const loadLibrary = useCallback(async (folder = selectedFolder, key = adminKey) => {
+  const loadLibrary = useCallback(async (folder = selectedFolder) => {
     setLoading(true);
     setError("");
     try {
       const query = folder ? `?folder=${encodeURIComponent(folder)}` : "";
-      const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`, {
-        headers: key ? { "x-album-admin-key": key } : {},
-      }));
+      const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`));
       setFolders(data.folders);
       setPhotos(data.photos);
       setStorageConfigured(data.storageConfigured);
@@ -294,7 +322,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [adminKey, selectedFolder]);
+  }, [selectedFolder]);
 
   useEffect(() => {
     if (window.location.hostname === LEGACY_ALBUM_HOST) {
@@ -311,17 +339,7 @@ export default function Home() {
           setSharedFolder(fromUrl);
           setSharedUploadToken(uploadToken);
         }
-        const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
-        if (savedAdminKey) {
-          try {
-            await verifyAdminKey(savedAdminKey, false);
-            await loadLibrary(fromUrl, savedAdminKey);
-            return;
-          } catch {
-            sessionStorage.removeItem("album-admin-key");
-          }
-        }
-        await loadLibrary(fromUrl, "");
+        await loadLibrary(fromUrl);
       };
       void run();
     }, 0);
@@ -340,6 +358,7 @@ export default function Home() {
   );
 
   const chooseFolder = (slug: string) => {
+    setActiveView("album");
     setPhotos([]);
     setPreview(null);
     setFolderLocked(false);
@@ -349,7 +368,7 @@ export default function Home() {
     if (slug) url.searchParams.set("folder", slug);
     else url.searchParams.delete("folder");
     window.history.replaceState({}, "", url);
-    void loadLibrary(slug, adminKey);
+    void loadLibrary(slug);
   };
 
   const createFolder = async () => {
@@ -415,7 +434,6 @@ export default function Home() {
           isAdmin ? "" : sharedUploadToken,
           file,
           dimensions,
-          adminKey,
           (progress) => updateUpload(uploadId, { progress }),
         );
         updateUpload(uploadId, { progress: 100, status: "done" });
@@ -471,32 +489,6 @@ export default function Home() {
     }
   };
 
-  const unlockAdmin = async () => {
-    const candidate = adminInput.trim();
-    if (!candidate) return;
-    setVerifyingAdmin(true);
-    setError("");
-    try {
-      await verifyAdminKey(candidate);
-      await loadLibrary(selectedFolder, candidate);
-      setAdminInput("");
-      setAdminOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "管理口令错误");
-    } finally {
-      setVerifyingAdmin(false);
-    }
-  };
-
-  const lockAdmin = () => {
-    sessionStorage.removeItem("album-admin-key");
-    setAdminKey("");
-    setIsAdmin(false);
-    setPhotos([]);
-    setPreview(null);
-    void loadLibrary(selectedFolder, "");
-  };
-
   const unlockFolder = async () => {
     if (!selectedFolder || !unlockPassword) return;
     setUnlockingFolder(true);
@@ -510,7 +502,7 @@ export default function Home() {
         }),
       );
       setUnlockPassword("");
-      await loadLibrary(selectedFolder, "");
+      await loadLibrary(selectedFolder);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "解锁文件夹失败");
     } finally {
@@ -532,7 +524,7 @@ export default function Home() {
       );
       setSecurityPassword("");
       setSecurityOpen(false);
-      await loadLibrary(selectedFolder, adminKey);
+      await loadLibrary(selectedFolder);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "设置文件夹密码失败");
     } finally {
@@ -553,7 +545,7 @@ export default function Home() {
       );
       setSecurityPassword("");
       setSecurityOpen(false);
-      await loadLibrary(selectedFolder, adminKey);
+      await loadLibrary(selectedFolder);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "移除文件夹密码失败");
     } finally {
@@ -617,6 +609,77 @@ export default function Home() {
     }
   };
 
+  const logMediaAccess = (photo: PhotoItem, action: "media.view" | "media.download") => {
+    void fetch("/api/audit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action,
+        resourceId: photo.id,
+        resourceName: photo.name,
+        folderSlug: photo.folderSlug,
+      }),
+      keepalive: true,
+    });
+  };
+
+  const openPreview = (photo: PhotoItem) => {
+    setPreview(photo);
+    logMediaAccess(photo, "media.view");
+  };
+
+  const logout = async () => {
+    await fetch("/api/auth/session", { method: "DELETE" });
+    window.location.reload();
+  };
+
+  const loadAdminData = async (section: AdminSection = adminSection) => {
+    if (!isAdmin) return;
+    setAdminLoading(true);
+    setError("");
+    try {
+      if (section === "users") {
+        const result = await readJson<{ users: PublicAlbumUser[] }>(await fetch("/api/admin/users"));
+        setManagedUsers(result.users);
+      } else {
+        const result = await readJson<{ logs: AlbumAuditLog[] }>(await fetch("/api/admin/audit-logs?limit=200"));
+        setAuditLogs(result.logs);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "读取管理数据失败");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const openAdminView = (section: AdminSection = "users") => {
+    setActiveView("admin");
+    setAdminSection(section);
+    void loadAdminData(section);
+  };
+
+  const switchAdminSection = (section: AdminSection) => {
+    setAdminSection(section);
+    void loadAdminData(section);
+  };
+
+  const updateManagedUser = async (
+    target: PublicAlbumUser,
+    changes: Partial<Pick<PublicAlbumUser, "role" | "status">>,
+  ) => {
+    setError("");
+    try {
+      const result = await readJson<{ user: PublicAlbumUser }>(await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: target.id, ...changes }),
+      }));
+      setManagedUsers((users) => users.map((user) => user.id === result.user.id ? result.user : user));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "更新用户权限失败");
+    }
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -655,12 +718,25 @@ export default function Home() {
               <b>{folder.locked ? <LockKeyhole size={13} aria-label="已加密" /> : folder.photoCount}</b>
             </button>
           ))}
+          {isAdmin && (
+            <button className={`folder-row admin-nav-row ${activeView === "admin" ? "active" : ""}`} onClick={() => openAdminView("users")}>
+              <Users size={18} />
+              <span>用户与日志</span>
+              <ShieldCheck size={14} />
+            </button>
+          )}
         </nav>
 
-        <button className={`admin-access ${isAdmin ? "active" : ""}`} onClick={() => isAdmin ? lockAdmin() : setAdminOpen(true)}>
-          {isAdmin ? <ShieldCheck size={16} /> : <KeyRound size={16} />}
-          <span>{isAdmin ? "管理模式已开启" : "管理相册"}</span>
-        </button>
+        <div className="signed-user">
+          <span className="user-avatar">
+            {initialUser.avatarUrl ? <img src={initialUser.avatarUrl} alt="" /> : <UserRound size={18} />}
+          </span>
+          <span className="user-copy">
+            <strong>{initialUser.displayName}</strong>
+            <small>{providerLabel(initialUser.provider)} · {isAdmin ? "管理员" : "成员"}</small>
+          </span>
+          <button className="icon-button inverse" onClick={() => void logout()} title="退出登录" aria-label="退出登录"><LogOut size={16} /></button>
+        </div>
 
         <div className="storage-meter">
           <div className="storage-line">
@@ -672,6 +748,7 @@ export default function Home() {
         </div>
       </aside>
 
+      {activeView === "album" ? (
       <section className="workspace">
         <header className="topbar">
           <div className="breadcrumb">
@@ -785,7 +862,7 @@ export default function Home() {
             <div className={viewMode === "grid" ? "photo-grid" : "photo-list"}>
               {visiblePhotos.map((photo) => (
                 <article className="photo-card" key={photo.id}>
-                  <button className="photo-preview" onClick={() => setPreview(photo)} aria-label={`预览 ${photo.name}`}>
+                  <button className="photo-preview" onClick={() => openPreview(photo)} aria-label={`预览 ${photo.name}`}>
                     {isVideoMimeType(photo.mimeType)
                       ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
                       : <img src={photo.url} alt={photo.name} loading="lazy" />}
@@ -804,7 +881,7 @@ export default function Home() {
                           <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title={`删除${mediaLabel(photo)}`} aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
                         </>
                       )}
-                      <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原文件" aria-label={`下载 ${photo.name}`}>
+                      <a className="icon-button" href={downloadUrl(photo.url, photo.name)} onClick={() => logMediaAccess(photo, "media.download")} title="下载原文件" aria-label={`下载 ${photo.name}`}>
                         <Download size={17} />
                       </a>
                     </div>
@@ -831,6 +908,102 @@ export default function Home() {
           )}
         </div>
       </section>
+      ) : (
+        <section className="workspace admin-workspace">
+          <header className="topbar">
+            <div className="breadcrumb">
+              <span>管理</span><ChevronRight size={15} />
+              <strong>{adminSection === "users" ? "用户管理" : "访问与操作日志"}</strong>
+            </div>
+            <div className="top-actions">
+              <button className="secondary-button" onClick={() => void loadAdminData()} disabled={adminLoading}>
+                {adminLoading ? <LoaderCircle className="spin" size={17} /> : <Activity size={17} />}
+                刷新
+              </button>
+              <button className="secondary-button" onClick={() => setActiveView("album")}>
+                <Images size={17} /> 返回相册
+              </button>
+            </div>
+          </header>
+          <div className="content admin-content">
+            {error && (
+              <div className="error-banner" role="alert">
+                <span>{error}</span>
+                <button className="icon-button" onClick={() => setError("")} aria-label="关闭"><X size={16} /></button>
+              </div>
+            )}
+            <div className="admin-page-heading">
+              <div>
+                <h1>相册管理</h1>
+                <p>成员身份、访问状态和审计记录仅对管理员可见。</p>
+              </div>
+              <div className="admin-tabs" role="tablist" aria-label="管理视图">
+                <button className={adminSection === "users" ? "active" : ""} onClick={() => switchAdminSection("users")} role="tab">
+                  <Users size={17} /> 用户
+                </button>
+                <button className={adminSection === "logs" ? "active" : ""} onClick={() => switchAdminSection("logs")} role="tab">
+                  <Activity size={17} /> 日志
+                </button>
+              </div>
+            </div>
+
+            {adminLoading ? (
+              <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取管理数据</div>
+            ) : adminSection === "users" ? (
+              <div className="management-table" role="table" aria-label="用户管理">
+                <div className="management-row management-header" role="row">
+                  <span>用户</span><span>登录来源</span><span>最后登录</span><span>角色</span><span>状态</span>
+                </div>
+                {managedUsers.map((user) => (
+                  <div className="management-row user-row" role="row" key={user.id}>
+                    <div className="managed-user">
+                      <span className="managed-avatar">{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : <UserRound size={18} />}</span>
+                      <span><strong>{user.displayName}</strong><small>{user.accountLabel}</small></span>
+                    </div>
+                    <span className={`provider-tag ${user.provider}`}>{providerLabel(user.provider)}</span>
+                    <span className="table-date">{formatFullDate(user.lastLoginAt)}</span>
+                    <select
+                      value={user.role}
+                      disabled={user.id === initialUser.id}
+                      onChange={(event) => void updateManagedUser(user, { role: event.target.value as PublicAlbumUser["role"] })}
+                      aria-label={`${user.displayName}的角色`}
+                    >
+                      <option value="member">成员</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                    <label className="status-toggle">
+                      <input
+                        type="checkbox"
+                        checked={user.status === "active"}
+                        disabled={user.id === initialUser.id}
+                        onChange={(event) => void updateManagedUser(user, { status: event.target.checked ? "active" : "disabled" })}
+                      />
+                      <span>{user.status === "active" ? "已启用" : "已停用"}</span>
+                    </label>
+                  </div>
+                ))}
+                {!managedUsers.length && <div className="table-empty">还没有用户记录</div>}
+              </div>
+            ) : (
+              <div className="management-table audit-table" role="table" aria-label="访问与操作日志">
+                <div className="management-row audit-row management-header" role="row">
+                  <span>时间</span><span>用户</span><span>操作</span><span>对象</span><span>访问摘要</span>
+                </div>
+                {auditLogs.map((log) => (
+                  <div className="management-row audit-row" role="row" key={log.id}>
+                    <span className="table-date">{formatFullDate(log.createdAt)}</span>
+                    <span className="audit-user"><strong>{log.userName}</strong><small>{providerLabel(log.provider)}</small></span>
+                    <span className="action-tag">{ACTION_LABELS[log.action] || log.action}</span>
+                    <span className="resource-cell"><strong>{log.resourceName || log.resourceType}</strong><small>{log.path}</small></span>
+                    <span className="audit-fingerprint" title={log.userAgent}>{log.ipHash}</span>
+                  </div>
+                ))}
+                {!auditLogs.length && <div className="table-empty">还没有审计记录</div>}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {uploads.length > 0 && (
         <aside className="upload-panel" aria-live="polite">
@@ -867,25 +1040,6 @@ export default function Home() {
               <button className="secondary-button" onClick={() => setNewFolderOpen(false)}>取消</button>
               <button className="primary-button" disabled={!newFolderName.trim() || creatingFolder} onClick={() => void createFolder()}>
                 {creatingFolder ? <LoaderCircle className="spin" size={17} /> : <Plus size={17} />} 创建
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {adminOpen && (
-        <div className="modal-backdrop" onMouseDown={() => setAdminOpen(false)}>
-          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="admin-title">
-            <div className="dialog-heading">
-              <div><span className="dialog-icon"><KeyRound size={20} /></span><h2 id="admin-title">管理相册</h2></div>
-              <button className="icon-button" onClick={() => setAdminOpen(false)} aria-label="关闭"><X size={18} /></button>
-            </div>
-            <label className="field-label" htmlFor="admin-key">管理口令</label>
-            <input id="admin-key" className="text-input" type="password" autoFocus value={adminInput} onChange={(event) => setAdminInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void unlockAdmin(); }} autoComplete="current-password" />
-            <div className="dialog-actions">
-              <button className="secondary-button" onClick={() => setAdminOpen(false)}>取消</button>
-              <button className="primary-button" disabled={!adminInput.trim() || verifyingAdmin} onClick={() => void unlockAdmin()}>
-                {verifyingAdmin ? <LoaderCircle className="spin" size={17} /> : <KeyRound size={17} />} 进入管理
               </button>
             </div>
           </section>
@@ -987,7 +1141,7 @@ export default function Home() {
                 </>
               )}
               <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制文件链接" aria-label="复制文件链接"><Clipboard size={18} /></button>
-              <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} title="下载原文件" aria-label="下载原文件"><Download size={18} /></a>
+              <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} onClick={() => logMediaAccess(preview, "media.download")} title="下载原文件" aria-label="下载原文件"><Download size={18} /></a>
               <button className="icon-button dark" onClick={() => setPreview(null)} title="关闭" aria-label="关闭预览"><X size={20} /></button>
             </div>
           </div>

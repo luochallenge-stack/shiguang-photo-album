@@ -1,5 +1,7 @@
 import { createFolderAccessCookie, verifyFolderPassword } from "../../../../lib/access";
 import { findFolder } from "../../../../lib/cloudbase";
+import { currentUser, unauthenticated } from "../../../../lib/auth";
+import { recordAudit } from "../../../../lib/audit";
 
 type Attempt = { count: number; resetAt: number };
 
@@ -13,6 +15,8 @@ function attemptKey(request: Request, folderSlug: string): string {
 }
 
 export async function POST(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
   try {
     const payload = (await request.json()) as { folderSlug?: unknown; password?: unknown };
     const folderSlug = typeof payload.folderSlug === "string" ? payload.folderSlug.trim() : "";
@@ -30,10 +34,24 @@ export async function POST(request: Request) {
     const folder = await findFolder(folderSlug);
     if (!folder?.passwordHash || !(await verifyFolderPassword(password, folder.passwordHash))) {
       attempts.set(key, { ...attempt, count: attempt.count + 1 });
+      await recordAudit(request, user, {
+        action: "folder.unlock.failed",
+        resourceType: "folder",
+        resourceId: folder?.id || "",
+        resourceName: folder?.name || folderSlug,
+        metadata: { folderSlug },
+      });
       return Response.json({ error: "文件夹密码错误" }, { status: 401 });
     }
 
     attempts.delete(key);
+    await recordAudit(request, user, {
+      action: "folder.unlock",
+      resourceType: "folder",
+      resourceId: folder.id,
+      resourceName: folder.name,
+      metadata: { folderSlug },
+    });
     return Response.json({ ok: true }, {
       headers: { "set-cookie": await createFolderAccessCookie(folder) },
     });

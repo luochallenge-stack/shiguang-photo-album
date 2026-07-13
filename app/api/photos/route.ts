@@ -8,10 +8,14 @@ import {
   renamePhotoRecord,
   uploadPhoto,
 } from "../../../lib/cloudbase";
-import { canWriteFolder, isAdminRequest, unauthorized } from "../../../lib/access";
-import { mediaInfo, mediaSizeError } from "../../../lib/media";
+import { canWriteFolder, unauthorized } from "../../../lib/access";
+import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
+import { recordAudit } from "../../../lib/audit";
+import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
 
 export async function POST(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
   try {
     const form = await request.formData();
     const file = form.get("file");
@@ -23,7 +27,7 @@ export async function POST(request: Request) {
     }
     const sizeError = mediaSizeError(media.kind, file.size);
     if (sizeError) return Response.json({ error: sizeError }, { status: 413 });
-    if (!(await canWriteFolder(request, folderSlug, uploadToken))) return unauthorized();
+    if (!(await canWriteFolder(request, folderSlug, uploadToken, user))) return unauthorized();
 
     const folder = await findFolder(folderSlug);
     if (!folder) {
@@ -46,6 +50,13 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
     await createPhotoRecord(photo);
+    await recordAudit(request, user, {
+      action: "media.upload",
+      resourceType: media.kind,
+      resourceId: photo.id,
+      resourceName: photo.name,
+      metadata: { folderSlug, size: photo.size, mimeType: photo.mimeType },
+    });
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存图片或视频信息失败";
@@ -54,8 +65,10 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
+  if (user.role !== "admin") return forbidden();
   try {
-    if (!isAdminRequest(request)) return unauthorized();
     const body = (await request.json()) as { id?: unknown; name?: unknown };
     const id = typeof body.id === "string" ? body.id.trim() : "";
     const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -65,6 +78,13 @@ export async function PATCH(request: Request) {
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
     await renamePhotoRecord(id, name);
+    await recordAudit(request, user, {
+      action: "media.rename",
+      resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
+      resourceId: photo.id,
+      resourceName: name,
+      metadata: { previousName: photo.name, folderSlug: photo.folderSlug },
+    });
     return Response.json({ photo: { ...photo, name } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "重命名文件失败";
@@ -73,8 +93,10 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
+  if (user.role !== "admin") return forbidden();
   try {
-    if (!isAdminRequest(request)) return unauthorized();
     const id = new URL(request.url).searchParams.get("id")?.trim() || "";
     if (!id) return Response.json({ error: "缺少文件标识" }, { status: 400 });
 
@@ -82,6 +104,13 @@ export async function DELETE(request: Request) {
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
     await deletePhotoFile(photo.fileId);
     await deletePhotoRecord(id);
+    await recordAudit(request, user, {
+      action: "media.delete",
+      resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
+      resourceId: photo.id,
+      resourceName: photo.name,
+      metadata: { folderSlug: photo.folderSlug, size: photo.size },
+    });
     return Response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "删除文件失败";

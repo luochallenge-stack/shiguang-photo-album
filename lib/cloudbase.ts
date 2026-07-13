@@ -22,6 +22,41 @@ export type AlbumPhoto = {
   createdAt: string;
 };
 
+export type AlbumUserRole = "admin" | "member";
+export type AlbumUserStatus = "active" | "disabled";
+export type AlbumUserProvider = "wechat" | "qq" | "admin";
+
+export type AlbumUser = {
+  id: string;
+  provider: AlbumUserProvider;
+  providerUserId: string;
+  accountLabel: string;
+  displayName: string;
+  avatarUrl: string;
+  role: AlbumUserRole;
+  status: AlbumUserStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string;
+};
+
+export type AlbumAuditLog = {
+  id: string;
+  userId: string;
+  userName: string;
+  provider: AlbumUserProvider;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  resourceName: string;
+  method: string;
+  path: string;
+  ipHash: string;
+  userAgent: string;
+  metadata: Record<string, string | number | boolean | null>;
+  createdAt: string;
+};
+
 type UploadTokenRecord = {
   folderSlug: string;
   tokenHash: string;
@@ -32,6 +67,8 @@ const COLLECTIONS = {
   folders: "album_folders",
   photos: "album_photos",
   uploadTokens: "album_upload_tokens",
+  users: "album_users",
+  auditLogs: "album_audit_logs",
 } as const;
 
 let app: ReturnType<typeof cloudbaseSdk.init> | null = null;
@@ -119,6 +156,37 @@ export async function getUploadTokenRecord(folderSlug: string): Promise<UploadTo
 
 export async function setUploadTokenRecord(record: UploadTokenRecord): Promise<void> {
   await database().collection(COLLECTIONS.uploadTokens).doc(record.folderSlug).set(record);
+}
+
+export async function findUser(id: string): Promise<AlbumUser | null> {
+  const result = await database().collection(COLLECTIONS.users).doc(id).get();
+  return rows<AlbumUser>(result)[0] || null;
+}
+
+export async function saveUser(user: AlbumUser): Promise<void> {
+  await database().collection(COLLECTIONS.users).doc(user.id).set(user);
+}
+
+export async function updateUserAccess(
+  id: string,
+  changes: Partial<Pick<AlbumUser, "role" | "status" | "updatedAt">>,
+): Promise<void> {
+  await database().collection(COLLECTIONS.users).doc(id).update(changes);
+}
+
+export async function listUsers(): Promise<AlbumUser[]> {
+  const result = await database().collection(COLLECTIONS.users).orderBy("lastLoginAt", "desc").limit(200).get();
+  return rows<AlbumUser>(result);
+}
+
+export async function createAuditLog(record: AlbumAuditLog): Promise<void> {
+  await database().collection(COLLECTIONS.auditLogs).doc(record.id).set(record);
+}
+
+export async function listAuditLogs(limit = 200): Promise<AlbumAuditLog[]> {
+  const safeLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+  const result = await database().collection(COLLECTIONS.auditLogs).orderBy("createdAt", "desc").limit(safeLimit).get();
+  return rows<AlbumAuditLog>(result);
 }
 
 export function createObjectKey(folderSlug: string, filename: string): string {

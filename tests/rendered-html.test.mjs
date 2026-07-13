@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("builds the finished photo and video album surface", async () => {
-  const [page, client, layout, accessControl, libraryRoute, uploadRoute, media] = await Promise.all([
+test("builds the authenticated photo and video album surface", async () => {
+  const [page, client, login, layout, accessControl, auth, libraryRoute, uploadRoute, media] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/login-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/media.ts", import.meta.url), "utf8"),
@@ -20,7 +22,15 @@ test("builds the finished photo and video album surface", async () => {
   assert.match(client, /伞兵训练营的时光集/);
   assert.match(client, /腾讯云 CloudBase/);
   assert.match(client, /api\/folders/);
-  assert.match(client, /管理相册/);
+  assert.match(client, /用户与日志/);
+  assert.match(client, /访问与操作日志/);
+  assert.match(login, /微信登录/);
+  assert.match(login, /QQ 登录/);
+  assert.match(login, /管理员入口/);
+  assert.match(page, /userFromSessionToken/);
+  assert.match(auth, /HttpOnly; SameSite=Lax/);
+  assert.match(auth, /open\.weixin\.qq\.com/);
+  assert.match(auth, /graph\.qq\.com/);
   assert.match(client, /api\/folders\/share/);
   assert.match(client, /重命名\{mediaLabel\(editingPhoto\)\}/);
   assert.match(client, /删除\{mediaLabel\(deletingPhoto\)\}/);
@@ -46,9 +56,10 @@ test("builds the finished photo and video album surface", async () => {
 });
 
 test("keeps CloudBase credentials server-side", async () => {
-  const [client, cloudbase, uploadRoute, exampleEnv] = await Promise.all([
+  const [client, cloudbase, auth, uploadRoute, exampleEnv] = await Promise.all([
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../.env.example", import.meta.url), "utf8"),
   ]);
@@ -60,4 +71,7 @@ test("keeps CloudBase credentials server-side", async () => {
   assert.doesNotMatch(client + uploadRoute, /CLOUDBASE_APIKEY/);
   assert.match(exampleEnv, /CLOUDBASE_APIKEY/);
   assert.match(exampleEnv, /ALBUM_ADMIN_KEY/);
+  assert.doesNotMatch(client, /WECHAT_APP_SECRET|QQ_APP_KEY|ALBUM_SESSION_SECRET/);
+  assert.match(auth, /WECHAT_APP_SECRET/);
+  assert.match(auth, /QQ_APP_KEY/);
 });

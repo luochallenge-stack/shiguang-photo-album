@@ -13,6 +13,8 @@ import {
   resolvePhotoUrls,
   type AlbumPhoto,
 } from "../../../../lib/cloudbase";
+import { currentUser, unauthenticated } from "../../../../lib/auth";
+import { recordAudit } from "../../../../lib/audit";
 import { mediaInfo, mediaSizeError } from "../../../../lib/media";
 
 function dimension(value: unknown): number | null {
@@ -21,6 +23,8 @@ function dimension(value: unknown): number | null {
 }
 
 export async function POST(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
   try {
     const body = (await request.json()) as {
       folderSlug?: unknown;
@@ -42,7 +46,7 @@ export async function POST(request: Request) {
     }
     const sizeError = mediaSizeError(media.kind, size);
     if (sizeError) return Response.json({ error: sizeError }, { status: 413 });
-    if (!(await canWriteFolder(request, folderSlug, uploadToken))) return unauthorized();
+    if (!(await canWriteFolder(request, folderSlug, uploadToken, user))) return unauthorized();
     if (!(await findFolder(folderSlug))) return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
 
     const objectKey = createObjectKey(folderSlug, name);
@@ -72,12 +76,14 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const user = await currentUser(request);
+  if (!user) return unauthenticated();
   try {
     const body = (await request.json()) as { ticket?: unknown; uploadToken?: unknown };
     const ticket = typeof body.ticket === "string" ? await readMediaUploadTicket(body.ticket) : null;
     const uploadToken = typeof body.uploadToken === "string" ? body.uploadToken : "";
     if (!ticket) return Response.json({ error: "上传凭证无效或已过期" }, { status: 400 });
-    if (!(await canWriteFolder(request, ticket.folderSlug, uploadToken))) return unauthorized();
+    if (!(await canWriteFolder(request, ticket.folderSlug, uploadToken, user))) return unauthorized();
     if (!(await findFolder(ticket.folderSlug))) return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
     const media = mediaInfo(ticket.name, ticket.mimeType);
     if (!media || mediaSizeError(media.kind, ticket.size)) {
@@ -100,6 +106,13 @@ export async function PATCH(request: Request) {
     };
     await createPhotoRecord(photo);
     const [url] = await resolvePhotoUrls([photo.fileId]);
+    await recordAudit(request, user, {
+      action: "media.upload",
+      resourceType: media.kind,
+      resourceId: photo.id,
+      resourceName: photo.name,
+      metadata: { folderSlug: photo.folderSlug, size: photo.size, mimeType: photo.mimeType },
+    });
     return Response.json({ photo: { ...photo, url: url || photo.url } }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "登记上传文件失败";

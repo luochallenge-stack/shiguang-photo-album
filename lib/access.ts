@@ -1,4 +1,4 @@
-import { getUploadTokenRecord, type AlbumFolder } from "./cloudbase";
+import { getUploadTokenRecord, type AlbumFolder, type AlbumUser } from "./cloudbase";
 
 const FOLDER_ACCESS_SECONDS = 12 * 60 * 60;
 const PASSWORD_ITERATIONS = 210_000;
@@ -135,8 +135,8 @@ function readCookie(request: Request, name: string): string {
     ?.slice(prefix.length) || "";
 }
 
-export async function canReadFolder(request: Request, folder: AlbumFolder): Promise<boolean> {
-  if (!folder.passwordHash || isAdminRequest(request)) return true;
+export async function canReadFolder(request: Request, folder: AlbumFolder, user?: AlbumUser | null): Promise<boolean> {
+  if (!folder.passwordHash || user?.role === "admin") return true;
   const token = readCookie(request, await folderCookieName(folder.slug));
   const [payload, signature] = token.split(".");
   if (!payload || !signature || !constantEqual(signature, await sign(payload))) return false;
@@ -155,12 +155,6 @@ export async function canReadFolder(request: Request, folder: AlbumFolder): Prom
   }
 }
 
-export function isAdminRequest(request: Request): boolean {
-  const configured = process.env.ALBUM_ADMIN_KEY || "";
-  const provided = request.headers.get("x-album-admin-key") || "";
-  return constantEqual(configured, provided);
-}
-
 export async function hashUploadToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(token));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -170,8 +164,9 @@ export async function canWriteFolder(
   request: Request,
   folderSlug: string,
   uploadToken?: string,
+  user?: AlbumUser | null,
 ): Promise<boolean> {
-  if (isAdminRequest(request)) return true;
+  if (user?.role === "admin") return true;
   if (!folderSlug || !uploadToken) return false;
   const tokenHash = await hashUploadToken(uploadToken);
   const match = await getUploadTokenRecord(folderSlug);
@@ -179,5 +174,5 @@ export async function canWriteFolder(
 }
 
 export function unauthorized() {
-  return Response.json({ error: "需要管理口令或有效的文件夹上传链接" }, { status: 401 });
+  return Response.json({ error: "需要管理员权限或有效的文件夹上传链接" }, { status: 403 });
 }
