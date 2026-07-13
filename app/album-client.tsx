@@ -34,6 +34,7 @@ import {
   X,
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import NextImage from "next/image";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
 import type { PublicAlbumUser } from "@/lib/auth";
 import type { AlbumAuditLog } from "@/lib/cloudbase";
@@ -114,11 +115,12 @@ function formatFullDate(value: string): string {
 }
 
 function providerLabel(provider: PublicAlbumUser["provider"]): string {
-  return provider === "wechat" ? "微信" : provider === "qq" ? "QQ" : "管理员";
+  return provider === "local" ? "站内账号" : "管理员口令";
 }
 
 const ACTION_LABELS: Record<string, string> = {
   "auth.login": "登录相册",
+  "auth.register": "注册账号",
   "auth.logout": "退出登录",
   "album.view": "访问相册",
   "media.view": "预览影像",
@@ -684,7 +686,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand-block">
-          <div className="brand-mark"><Images size={20} strokeWidth={2.2} /></div>
+          <div className="brand-mark"><NextImage src="/logo.png" alt="" width={42} height={42} priority /></div>
           <div>
             <strong>伞兵训练营的时光集</strong>
             <span>照片与视频影像集</span>

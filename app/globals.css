@@ -372,6 +372,7 @@ button { color: inherit; }
   background: var(--forest);
 }
 .login-brand-mark { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 8px; color: var(--forest); background: var(--yellow); }
+.login-brand-mark img, .brand-mark img { width: 100%; height: 100%; display: block; border-radius: inherit; object-fit: cover; }
 .login-brand h1 { max-width: 620px; margin: 28px 0 12px; font-size: clamp(34px, 4.5vw, 64px); line-height: 1.08; }
 .login-brand p { max-width: 540px; margin: 0; color: rgba(255,255,255,.68); font-size: 15px; line-height: 1.75; }
 .login-security-note { max-width: 510px; display: flex; align-items: flex-start; gap: 10px; margin-top: 52px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.62); font-size: 12px; line-height: 1.6; }
@@ -380,30 +381,18 @@ button { color: inherit; }
 .login-heading > span { color: var(--coral-dark); font-size: 11px; font-weight: 800; }
 .login-heading h2 { margin: 9px 0 8px; font-size: 26px; }
 .login-heading p { margin: 0 0 28px; color: var(--muted); font-size: 12px; line-height: 1.6; }
-.social-login-list { display: grid; gap: 10px; }
-.social-login {
-  min-height: 62px;
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--ink);
-  background: white;
-  cursor: pointer;
-  text-align: left;
-}
-.social-login:not(:disabled):hover { border-color: #a8b9b4; background: var(--soft); }
-.social-login svg { width: 36px; height: 36px; padding: 8px; border-radius: 7px; }
-.social-login.wechat svg { color: #167d50; background: #e5f5ed; }
-.social-login.qq svg { color: #285d91; background: #e8f1fa; }
-.social-login span, .social-login strong, .social-login small { display: block; }
-.social-login strong { font-size: 13px; }
-.social-login small { margin-top: 4px; color: var(--muted); font-size: 10px; }
-.social-login:disabled { cursor: not-allowed; opacity: .52; }
+.auth-mode-switch { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px; margin-bottom: 18px; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: white; }
+.auth-mode-switch button { height: 38px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 800; cursor: pointer; }
+.auth-mode-switch button.active { color: var(--forest); background: var(--mint); }
+.credential-form { display: grid; gap: 13px; }
+.credential-form label > span { display: block; margin-bottom: 7px; color: #4b5552; font-size: 10px; font-weight: 700; }
+.credential-form input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #cfd7d3; border-radius: 6px; outline: 0; background: white; font-size: 13px; }
+.credential-form input:focus { border-color: #729a8f; box-shadow: 0 0 0 3px rgba(36,86,75,.09); }
+.credential-submit { height: 42px; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 3px; border: 1px solid var(--forest); border-radius: 6px; color: white; background: var(--forest); font-size: 11px; font-weight: 800; cursor: pointer; }
+.credential-submit:hover { background: #183f36; }
+.credential-submit:disabled { cursor: not-allowed; opacity: .55; }
 .login-error { margin-top: 14px; padding: 10px 12px; border: 1px solid #ecc8c4; border-radius: 6px; color: var(--danger); background: #fff0ee; font-size: 11px; }
+.credential-form .login-error { margin-top: 0; }
 .admin-login-toggle { display: flex; align-items: center; gap: 7px; margin-top: 24px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 700; cursor: pointer; }
 .admin-login-toggle:hover { color: var(--ink); }
 .admin-login-form { margin-top: 13px; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--soft); }
@@ -433,8 +422,7 @@ button { color: inherit; }
 .managed-user strong, .audit-user strong, .resource-cell strong { font-size: 11px; }
 .managed-user small, .audit-user small, .resource-cell small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .provider-tag, .action-tag { width: fit-content; max-width: 100%; padding: 4px 7px; overflow: hidden; border-radius: 5px; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 800; }
-.provider-tag.wechat { color: #16734c; background: #e5f5ed; }
-.provider-tag.qq { color: #285d91; background: #e8f1fa; }
+.provider-tag.local { color: #285d91; background: #e8f1fa; }
 .provider-tag.admin, .action-tag { color: #765914; background: #fff3ca; }
 .management-row select { width: 100%; height: 34px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: white; font-size: 10px; }
 .status-toggle { display: flex; align-items: center; gap: 7px; color: #46504d; font-size: 10px; }

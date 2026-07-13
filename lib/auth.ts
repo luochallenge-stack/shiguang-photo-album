@@ -1,36 +1,19 @@
 import {
   findUser,
+  findUserByAccountLabel,
   saveUser,
   type AlbumUser,
-  type AlbumUserProvider,
 } from "./cloudbase";
 
 const SESSION_COOKIE = "album-session";
-const OAUTH_COOKIE = "album-oauth-state";
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const OAUTH_SECONDS = 10 * 60;
+const PASSWORD_ITERATIONS = 210_000;
 const encoder = new TextEncoder();
 
 type SessionPayload = {
   userId: string;
   expiresAt: number;
 };
-
-type OAuthStatePayload = {
-  provider: SocialProvider;
-  state: string;
-  returnTo: string;
-  expiresAt: number;
-};
-
-type ProviderProfile = {
-  providerUserId: string;
-  accountLabel: string;
-  displayName: string;
-  avatarUrl: string;
-};
-
-export type SocialProvider = "wechat" | "qq";
 
 export type PublicAlbumUser = Pick<
   AlbumUser,
@@ -102,31 +85,6 @@ function secureCookie(request: Request): string {
   return forwardedProtocol === "https" || new URL(request.url).protocol === "https:" ? "; Secure" : "";
 }
 
-function sanitizeReturnTo(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-  return value.slice(0, 1500);
-}
-
-function providerCredentials(provider: SocialProvider): { clientId: string; clientSecret: string } {
-  if (provider === "wechat") {
-    return {
-      clientId: process.env.WECHAT_APP_ID || "",
-      clientSecret: process.env.WECHAT_APP_SECRET || "",
-    };
-  }
-  return {
-    clientId: process.env.QQ_APP_ID || "",
-    clientSecret: process.env.QQ_APP_KEY || "",
-  };
-}
-
-export function providerAvailability(): Record<SocialProvider, boolean> {
-  return {
-    wechat: Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET),
-    qq: Boolean(process.env.QQ_APP_ID && process.env.QQ_APP_KEY),
-  };
-}
-
 export function publicUser(user: AlbumUser): PublicAlbumUser {
   const {
     id,
@@ -178,55 +136,85 @@ export function forbidden() {
   return Response.json({ error: "只有管理员可以执行此操作" }, { status: 403 });
 }
 
-export async function createOAuthStart(
-  request: Request,
-  provider: SocialProvider,
-  requestedReturnTo: string | null,
-): Promise<{ authorizationUrl: string; cookie: string }> {
-  if (!providerAvailability()[provider]) throw new Error(`${provider === "wechat" ? "微信" : "QQ"}登录尚未配置`);
-  const { clientId } = providerCredentials(provider);
-  const state = crypto.randomUUID().replace(/-/g, "");
-  const returnTo = sanitizeReturnTo(requestedReturnTo);
-  const payload: OAuthStatePayload = {
-    provider,
-    state,
-    returnTo,
-    expiresAt: Date.now() + OAUTH_SECONDS * 1000,
-  };
-  const stateToken = await createSignedToken(payload);
-  const cookie = `${OAUTH_COOKIE}=${stateToken}; Path=/api/auth/callback; Max-Age=${OAUTH_SECONDS}; HttpOnly; SameSite=Lax${secureCookie(request)}`;
-  const redirectUri = `${publicOrigin(request)}/api/auth/callback/${provider}`;
-  const authorizationUrl = provider === "wechat"
-    ? `https://open.weixin.qq.com/connect/qrconnect?appid=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=snsapi_login&state=${encodeURIComponent(state)}#wechat_redirect`
-    : `https://graph.qq.com/oauth2.0/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}&scope=get_user_info`;
-  return { authorizationUrl, cookie };
+export function normalizeUsername(value: string): string {
+  return value.trim().toLowerCase();
 }
 
-export async function completeOAuth(
-  request: Request,
-  provider: SocialProvider,
-  code: string,
-  state: string,
-): Promise<{ user: AlbumUser; returnTo: string }> {
-  const payload = await readSignedToken<OAuthStatePayload>(cookieValue(request, OAUTH_COOKIE));
-  if (
-    !payload
-    || payload.provider !== provider
-    || !constantEqual(payload.state, state)
-    || payload.expiresAt <= Date.now()
-  ) {
-    throw new Error("第三方登录请求已失效，请重新发起登录");
+export function validateCredentials(username: string, password: string): string | null {
+  if (username === "administrator") return "这个用户名不可使用";
+  if (!/^[a-z0-9][a-z0-9_.-]{2,23}$/.test(username)) {
+    return "用户名需为 3-24 位字母、数字、点、下划线或短横线";
   }
-  const redirectUri = `${publicOrigin(request)}/api/auth/callback/${provider}`;
-  const profile = provider === "wechat"
-    ? await fetchWeChatProfile(code)
-    : await fetchQQProfile(code, redirectUri);
-  const user = await upsertSocialUser(provider, profile);
-  return { user, returnTo: sanitizeReturnTo(payload.returnTo) };
+  if (password.length < 8 || password.length > 72) return "密码需为 8-72 个字符";
+  return null;
 }
 
-export function clearOAuthCookie(request: Request): string {
-  return `${OAUTH_COOKIE}=; Path=/api/auth/callback; Max-Age=0; HttpOnly; SameSite=Lax${secureCookie(request)}`;
+export function validateDisplayName(value: string): string | null {
+  const length = Array.from(value.trim()).length;
+  return length >= 1 && length <= 20 ? null : "昵称需为 1-20 个字符";
+}
+
+async function derivePassword(password: string, salt: Uint8Array): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations: PASSWORD_ITERATIONS },
+    key,
+    256,
+  );
+  return Buffer.from(bits).toString("base64url");
+}
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2-sha256$${PASSWORD_ITERATIONS}$${Buffer.from(salt).toString("base64url")}$${await derivePassword(password, salt)}`;
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [algorithm, iterationText, saltText, expected] = stored.split("$");
+  const iterations = Number(iterationText);
+  if (algorithm !== "pbkdf2-sha256" || iterations !== PASSWORD_ITERATIONS || !saltText || !expected) return false;
+  const actual = await derivePassword(password, Buffer.from(saltText, "base64url"));
+  return constantEqual(actual, expected);
+}
+
+export async function registerLocalUser(usernameInput: string, password: string, displayNameInput: string): Promise<AlbumUser> {
+  const username = normalizeUsername(usernameInput);
+  const displayName = displayNameInput.trim();
+  const invalid = validateCredentials(username, password) || validateDisplayName(displayName);
+  if (invalid) throw new Error(invalid);
+  if (await findUserByAccountLabel(username)) throw new Error("这个用户名已经被注册");
+  const now = new Date().toISOString();
+  const user: AlbumUser = {
+    id: `local_${(await digest(`local:${username}`)).slice(0, 32)}`,
+    provider: "local",
+    providerUserId: username,
+    accountLabel: username,
+    displayName,
+    avatarUrl: "",
+    passwordHash: await hashPassword(password),
+    role: "member",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: now,
+  };
+  await saveUser(user);
+  return user;
+}
+
+export async function authenticateLocalUser(usernameInput: string, password: string): Promise<AlbumUser> {
+  const username = normalizeUsername(usernameInput);
+  const invalid = validateCredentials(username, password);
+  if (invalid) throw new Error("用户名或密码错误");
+  const user = await findUserByAccountLabel(username);
+  const validPassword = user?.provider === "local" && user.passwordHash
+    ? await verifyPassword(password, user.passwordHash)
+    : false;
+  if (!user || !validPassword) throw new Error("用户名或密码错误");
+  if (user.status === "disabled") throw new Error("这个账号已被管理员停用");
+  const updated = { ...user, lastLoginAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  await saveUser(updated);
+  return updated;
 }
 
 export async function createBootstrapAdmin(key: string): Promise<AlbumUser | null> {
@@ -242,6 +230,7 @@ export async function createBootstrapAdmin(key: string): Promise<AlbumUser | nul
     accountLabel: "administrator",
     displayName: existing?.displayName || "相册管理员",
     avatarUrl: "",
+    passwordHash: existing?.passwordHash,
     role: "admin",
     status: "active",
     createdAt: existing?.createdAt || now,
@@ -250,87 +239,4 @@ export async function createBootstrapAdmin(key: string): Promise<AlbumUser | nul
   };
   await saveUser(user);
   return user;
-}
-
-async function upsertSocialUser(provider: AlbumUserProvider, profile: ProviderProfile): Promise<AlbumUser> {
-  const id = `${provider}_${(await digest(`${provider}:${profile.providerUserId}`)).slice(0, 32)}`;
-  const existing = await findUser(id);
-  if (existing?.status === "disabled") throw new Error("这个账号已被管理员停用");
-  const now = new Date().toISOString();
-  const user: AlbumUser = {
-    id,
-    provider,
-    providerUserId: profile.providerUserId,
-    accountLabel: profile.accountLabel,
-    displayName: profile.displayName || existing?.displayName || "相册用户",
-    avatarUrl: profile.avatarUrl || existing?.avatarUrl || "",
-    role: existing?.role || "member",
-    status: existing?.status || "active",
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    lastLoginAt: now,
-  };
-  await saveUser(user);
-  return user;
-}
-
-function publicOrigin(request: Request): string {
-  const configured = process.env.ALBUM_PUBLIC_ORIGIN?.replace(/\/$/, "");
-  if (configured) return configured;
-  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const host = forwardedHost || request.headers.get("host");
-  const protocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || new URL(request.url).protocol.replace(":", "");
-  return host ? `${protocol}://${host}` : new URL(request.url).origin;
-}
-
-async function jsonRequest<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: { accept: "application/json" }, cache: "no-store" });
-  const text = await response.text();
-  let payload: T & { errcode?: number; errmsg?: string; error?: string; error_description?: string };
-  try {
-    payload = JSON.parse(text) as typeof payload;
-  } catch {
-    payload = Object.fromEntries(new URLSearchParams(text)) as typeof payload;
-  }
-  if (!response.ok || payload.errcode || payload.error) {
-    throw new Error(payload.errmsg || payload.error_description || "第三方登录服务返回错误");
-  }
-  return payload;
-}
-
-async function fetchWeChatProfile(code: string): Promise<ProviderProfile> {
-  const { clientId, clientSecret } = providerCredentials("wechat");
-  const token = await jsonRequest<{ access_token: string; openid: string }>(
-    `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(clientId)}&secret=${encodeURIComponent(clientSecret)}&code=${encodeURIComponent(code)}&grant_type=authorization_code`,
-  );
-  const profile = await jsonRequest<{ nickname?: string; headimgurl?: string; unionid?: string }>(
-    `https://api.weixin.qq.com/sns/userinfo?access_token=${encodeURIComponent(token.access_token)}&openid=${encodeURIComponent(token.openid)}&lang=zh_CN`,
-  );
-  const providerUserId = profile.unionid || token.openid;
-  return {
-    providerUserId,
-    accountLabel: `wx_${providerUserId.slice(-8)}`,
-    displayName: profile.nickname || "微信用户",
-    avatarUrl: profile.headimgurl || "",
-  };
-}
-
-async function fetchQQProfile(code: string, redirectUri: string): Promise<ProviderProfile> {
-  const { clientId, clientSecret } = providerCredentials("qq");
-  const token = await jsonRequest<{ access_token: string }>(
-    `https://graph.qq.com/oauth2.0/token?grant_type=authorization_code&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}&code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}&fmt=json`,
-  );
-  const identity = await jsonRequest<{ openid: string }>(
-    `https://graph.qq.com/oauth2.0/me?access_token=${encodeURIComponent(token.access_token)}&fmt=json`,
-  );
-  const profile = await jsonRequest<{ ret: number; msg?: string; nickname?: string; figureurl_qq_2?: string; figureurl_qq_1?: string }>(
-    `https://graph.qq.com/user/get_user_info?access_token=${encodeURIComponent(token.access_token)}&oauth_consumer_key=${encodeURIComponent(clientId)}&openid=${encodeURIComponent(identity.openid)}&fmt=json`,
-  );
-  if (profile.ret !== 0) throw new Error(profile.msg || "读取 QQ 用户资料失败");
-  return {
-    providerUserId: identity.openid,
-    accountLabel: `qq_${identity.openid.slice(-8)}`,
-    displayName: profile.nickname || "QQ 用户",
-    avatarUrl: profile.figureurl_qq_2 || profile.figureurl_qq_1 || "",
-  };
 }

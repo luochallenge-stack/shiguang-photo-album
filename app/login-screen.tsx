@@ -1,33 +1,55 @@
 "use client";
 
-import { CircleUserRound, Images, KeyRound, LoaderCircle, LockKeyhole, MessageCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { KeyRound, LoaderCircle, LockKeyhole, LogIn, UserPlus } from "lucide-react";
+import Image from "next/image";
+import { FormEvent, useState } from "react";
 
-type Props = {
-  providers: { wechat: boolean; qq: boolean };
-};
+type AuthMode = "login" | "register";
 
 async function responseJson(response: Response): Promise<{ error?: string }> {
   return response.json() as Promise<{ error?: string }>;
 }
 
-export default function LoginScreen({ providers }: Props) {
+export default function LoginScreen() {
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminKey, setAdminKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const message = new URLSearchParams(window.location.search).get("loginError");
-      if (message) setError(message === "cancelled" ? "登录已取消" : message);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const switchMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setError("");
+    setPassword("");
+    setConfirmPassword("");
+  };
 
-  const socialLogin = (provider: "wechat" | "qq") => {
-    const returnTo = `${window.location.pathname}${window.location.search.replace(/([?&])loginError=[^&]*/g, "$1").replace(/[?&]$/, "")}`;
-    window.location.assign(`/api/auth/login/${provider}?returnTo=${encodeURIComponent(returnTo || "/")}`);
+  const submitCredentials = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (mode === "register" && password !== confirmPassword) {
+      setError("两次输入的密码不一致");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password, displayName }),
+      });
+      const payload = await responseJson(response);
+      if (!response.ok) throw new Error(payload.error || (mode === "login" ? "登录失败" : "注册失败"));
+      window.location.reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : (mode === "login" ? "登录失败" : "注册失败"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const adminLogin = async () => {
@@ -53,39 +75,95 @@ export default function LoginScreen({ providers }: Props) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <span className="login-brand-mark"><Images size={30} /></span>
+        <span className="login-brand-mark"><Image src="/logo.png" alt="" width={58} height={58} priority /></span>
         <div>
           <h1>伞兵训练营的时光集</h1>
-          <p>登录后查看、上传和管理共同的照片与视频。</p>
+          <p>五个人，从初中到现在。照片和视频留在这里，故事继续往前走。</p>
         </div>
         <div className="login-security-note">
           <LockKeyhole size={18} />
-          <span>每次访问与修改都会记录，受保护文件夹仍需单独密码。</span>
+          <span>所有成员需要登录，普通账号默认只有浏览权限。</span>
         </div>
       </section>
 
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-heading">
           <span>成员入口</span>
-          <h2 id="login-title">登录相册</h2>
-          <p>使用已有社交账号，昵称会作为相册中的用户名称。</p>
+          <h2 id="login-title">{mode === "login" ? "登录相册" : "创建账号"}</h2>
+          <p>{mode === "login" ? "使用相册账号继续浏览共同的时光。" : "注册成功后即可浏览，管理权限由管理员单独授权。"}</p>
         </div>
 
-        <div className="social-login-list">
-          <button className="social-login wechat" disabled={!providers.wechat} onClick={() => socialLogin("wechat")}>
-            <MessageCircle size={21} />
-            <span><strong>微信登录</strong><small>{providers.wechat ? "使用微信开放平台账号" : "等待配置微信开放平台"}</small></span>
+        <div className="auth-mode-switch" role="tablist" aria-label="账号操作">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")} role="tab">
+            <LogIn size={16} /> 登录
           </button>
-          <button className="social-login qq" disabled={!providers.qq} onClick={() => socialLogin("qq")}>
-            <CircleUserRound size={21} />
-            <span><strong>QQ 登录</strong><small>{providers.qq ? "使用 QQ 互联账号" : "等待配置 QQ 互联"}</small></span>
+          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")} role="tab">
+            <UserPlus size={16} /> 注册
           </button>
         </div>
 
-        {error && <div className="login-error" role="alert">{error}</div>}
+        <form className="credential-form" onSubmit={submitCredentials}>
+          {mode === "register" && (
+            <label>
+              <span>昵称</span>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                autoComplete="name"
+                maxLength={20}
+                required
+              />
+            </label>
+          )}
+          <label>
+            <span>用户名</span>
+            <input
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+              minLength={3}
+              maxLength={24}
+              pattern="[A-Za-z0-9][A-Za-z0-9_.-]{2,23}"
+              required
+            />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              minLength={8}
+              maxLength={72}
+              required
+            />
+          </label>
+          {mode === "register" && (
+            <label>
+              <span>确认密码</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={72}
+                required
+              />
+            </label>
+          )}
+          {error && <div className="login-error" role="alert">{error}</div>}
+          <button className="credential-submit" type="submit" disabled={loading}>
+            {loading ? <LoaderCircle className="spin" size={17} /> : mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}
+            {mode === "login" ? "登录" : "注册并进入"}
+          </button>
+        </form>
 
         <button className="admin-login-toggle" onClick={() => setAdminOpen((value) => !value)}>
-          <KeyRound size={16} /> 管理员入口
+          <KeyRound size={16} /> 管理员口令入口
         </button>
         {adminOpen && (
           <form className="admin-login-form" onSubmit={(event) => { event.preventDefault(); void adminLogin(); }}>

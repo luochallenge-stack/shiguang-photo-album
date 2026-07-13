@@ -24,7 +24,7 @@ export type AlbumPhoto = {
 
 export type AlbumUserRole = "admin" | "member";
 export type AlbumUserStatus = "active" | "disabled";
-export type AlbumUserProvider = "wechat" | "qq" | "admin";
+export type AlbumUserProvider = "local" | "admin";
 
 export type AlbumUser = {
   id: string;
@@ -33,6 +33,7 @@ export type AlbumUser = {
   accountLabel: string;
   displayName: string;
   avatarUrl: string;
+  passwordHash?: string;
   role: AlbumUserRole;
   status: AlbumUserStatus;
   createdAt: string;
@@ -160,6 +161,11 @@ export async function setUploadTokenRecord(record: UploadTokenRecord): Promise<v
 
 export async function findUser(id: string): Promise<AlbumUser | null> {
   const result = await database().collection(COLLECTIONS.users).doc(id).get();
+  return rows<AlbumUser>(result)[0] || null;
+}
+
+export async function findUserByAccountLabel(accountLabel: string): Promise<AlbumUser | null> {
+  const result = await database().collection(COLLECTIONS.users).where({ accountLabel }).limit(1).get();
   return rows<AlbumUser>(result)[0] || null;
 }
 
