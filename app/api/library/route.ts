@@ -1,39 +1,21 @@
-import { desc, eq, sql } from "drizzle-orm";
-import { ensureSchema, getDb } from "../../../db";
-import { folders, photos } from "../../../db/schema";
-import { qiniuIsConfigured } from "../../../lib/qiniu";
+import { cloudBaseIsConfigured, listFolders, listPhotos, resolvePhotoUrls } from "../../../lib/cloudbase";
 
 export async function GET(request: Request) {
   try {
-    await ensureSchema();
     const url = new URL(request.url);
     const selectedFolder = url.searchParams.get("folder")?.trim();
-    const db = getDb();
-    const folderRows = await db
-      .select({
-        id: folders.id,
-        name: folders.name,
-        slug: folders.slug,
-        createdAt: folders.createdAt,
-        photoCount: sql<number>`count(${photos.id})`,
-      })
-      .from(folders)
-      .leftJoin(photos, eq(folders.slug, photos.folderSlug))
-      .groupBy(folders.id)
-      .orderBy(desc(folders.createdAt));
-
+    const [folderRows, allPhotos] = await Promise.all([listFolders(), listPhotos()]);
     const photoRows = selectedFolder
-      ? await db
-          .select()
-          .from(photos)
-          .where(eq(photos.folderSlug, selectedFolder))
-          .orderBy(desc(photos.createdAt))
-      : await db.select().from(photos).orderBy(desc(photos.createdAt)).limit(300);
+      ? allPhotos.filter((photo) => photo.folderSlug === selectedFolder)
+      : allPhotos;
+    const counts = new Map<string, number>();
+    for (const photo of allPhotos) counts.set(photo.folderSlug, (counts.get(photo.folderSlug) || 0) + 1);
+    const resolvedUrls = await resolvePhotoUrls(photoRows.map((photo) => photo.fileId));
 
     return Response.json({
-      folders: folderRows,
-      photos: photoRows,
-      storageConfigured: qiniuIsConfigured(),
+      folders: folderRows.map((folder) => ({ ...folder, photoCount: counts.get(folder.slug) || 0 })),
+      photos: photoRows.map((photo, index) => ({ ...photo, url: resolvedUrls[index] || photo.url })),
+      storageConfigured: cloudBaseIsConfigured(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "读取相册失败";

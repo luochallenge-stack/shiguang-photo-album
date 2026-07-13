@@ -1,11 +1,9 @@
-import { ensureSchema, getDb } from "../../../db";
-import { folders } from "../../../db/schema";
+import { createFolderRecord } from "../../../lib/cloudbase";
 import { folderSlug, normalizeFolderName } from "../../../lib/validation";
 import { isAdminRequest, unauthorized } from "../../../lib/access";
 
 export async function POST(request: Request) {
   try {
-    await ensureSchema();
     if (!isAdminRequest(request)) return unauthorized();
     const payload = (await request.json()) as { name?: string };
     const name = normalizeFolderName(payload.name || "");
@@ -18,8 +16,8 @@ export async function POST(request: Request) {
       name,
       slug: folderSlug(name),
     };
-    const db = getDb();
-    const [created] = await db.insert(folders).values(folder).returning();
+    const created = { ...folder, createdAt: new Date().toISOString() };
+    await createFolderRecord(created);
     return Response.json({ folder: { ...created, photoCount: 0 } }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "创建文件夹失败";

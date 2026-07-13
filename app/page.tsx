@@ -81,6 +81,12 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function downloadUrl(url: string, filename: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  const disposition = encodeURIComponent(`attachment; filename=${filename.replace(/[\r\n"\\]/g, "-")}`);
+  return `${url}${separator}response-content-disposition=${disposition}`;
+}
+
 async function imageDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
   if (!file.type.startsWith("image/") || file.type.includes("heic") || file.type.includes("heif")) {
     return { width: null, height: null };
@@ -116,26 +122,36 @@ function fileMimeType(file: File): string {
   return byExtension[extension || ""] || "application/octet-stream";
 }
 
-function uploadToQiniu(
-  uploadUrl: string,
-  token: string,
-  objectKey: string,
+function uploadToCloudBase(
+  folderSlug: string,
+  uploadToken: string,
   file: File,
+  dimensions: { width: number | null; height: number | null },
+  adminKey: string,
   onProgress: (progress: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    form.append("token", token);
-    form.append("key", objectKey);
+    form.append("folderSlug", folderSlug);
+    if (uploadToken) form.append("uploadToken", uploadToken);
+    if (dimensions.width) form.append("width", String(dimensions.width));
+    if (dimensions.height) form.append("height", String(dimensions.height));
     form.append("file", file);
     const request = new XMLHttpRequest();
-    request.open("POST", uploadUrl);
+    request.open("POST", "/api/photos");
+    if (adminKey) request.setRequestHeader("x-album-admin-key", adminKey);
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
     };
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) resolve();
-      else reject(new Error(`上传失败 (${request.status})`));
+      else {
+        try {
+          reject(new Error((JSON.parse(request.responseText) as { error?: string }).error || `上传失败 (${request.status})`));
+        } catch {
+          reject(new Error(`上传失败 (${request.status})`));
+        }
+      }
     };
     request.onerror = () => reject(new Error("上传网络中断"));
     request.send(form);
@@ -276,7 +292,7 @@ export default function Home() {
       return;
     }
     if (!storageConfigured) {
-      setError("七牛存储尚未配置，暂时不能上传");
+      setError("腾讯云存储尚未配置，暂时不能上传");
       return;
     }
 
@@ -288,47 +304,14 @@ export default function Home() {
       ]);
       try {
         if (file.size > 50 * 1024 * 1024) throw new Error("单张图片不能超过 50 MB");
-        const mimeType = fileMimeType(file);
-        const signed = await readJson<{
-          token: string;
-          uploadUrl: string;
-          objectKey: string;
-          publicUrl: string;
-        }>(
-          await fetch("/api/upload-token", {
-            method: "POST",
-            headers: adminHeaders(true),
-            body: JSON.stringify({
-              folderSlug: selectedFolder,
-              filename: file.name,
-              mimeType,
-              uploadToken: isAdmin ? undefined : sharedUploadToken,
-            }),
-          }),
-        );
-        await uploadToQiniu(
-          signed.uploadUrl,
-          signed.token,
-          signed.objectKey,
-          file,
-          (progress) => updateUpload(uploadId, { progress }),
-        );
         const dimensions = await imageDimensions(file);
-        await readJson<{ photo: PhotoItem }>(
-          await fetch("/api/photos", {
-            method: "POST",
-            headers: adminHeaders(true),
-            body: JSON.stringify({
-              folderSlug: selectedFolder,
-              objectKey: signed.objectKey,
-              name: file.name,
-              url: signed.publicUrl,
-              size: file.size,
-              mimeType,
-              uploadToken: isAdmin ? undefined : sharedUploadToken,
-              ...dimensions,
-            }),
-          }),
+        await uploadToCloudBase(
+          selectedFolder,
+          isAdmin ? "" : sharedUploadToken,
+          file,
+          dimensions,
+          adminKey,
+          (progress) => updateUpload(uploadId, { progress }),
         );
         updateUpload(uploadId, { progress: 100, status: "done" });
       } catch (cause) {
@@ -450,11 +433,11 @@ export default function Home() {
 
         <div className="storage-meter">
           <div className="storage-line">
-            <span><HardDrive size={15} /> 七牛 Kodo</span>
+            <span><HardDrive size={15} /> 腾讯云 CloudBase</span>
             <i className={storageConfigured ? "online" : "offline"} />
           </div>
           <div className="meter-track"><span style={{ width: `${Math.min(100, (totalPhotos / 3000) * 100)}%` }} /></div>
-          <small>免费额度 10 GB / 月</small>
+          <small>云存储与 CDN 加速</small>
         </div>
       </aside>
 
@@ -492,7 +475,7 @@ export default function Home() {
           {!storageConfigured && (
             <div className="notice" role="status">
               <HardDrive size={18} />
-              <span><strong>等待接入七牛存储</strong> 配置完成后即可在线上传与查看原图。</span>
+              <span><strong>等待接入腾讯云存储</strong> 配置完成后即可在线上传与查看原图。</span>
             </div>
           )}
           {sharedUploadToken && sharedFolder === selectedFolder && !isAdmin && (
@@ -549,7 +532,7 @@ export default function Home() {
                       <strong title={photo.name}>{photo.name}</strong>
                       <span>{formatSize(photo.size)} · {formatDate(photo.createdAt)}</span>
                     </div>
-                    <a className="icon-button" href={`${photo.url}?attname=${encodeURIComponent(photo.name)}`} title="下载原图" aria-label={`下载 ${photo.name}`}>
+                    <a className="icon-button" href={downloadUrl(photo.url, photo.name)} title="下载原图" aria-label={`下载 ${photo.name}`}>
                       <Download size={17} />
                     </a>
                   </div>
@@ -645,7 +628,7 @@ export default function Home() {
             </div>
             <div>
               <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制原图链接" aria-label="复制原图链接"><Clipboard size={18} /></button>
-              <a className="icon-button dark" href={`${preview.url}?attname=${encodeURIComponent(preview.name)}`} title="下载原图" aria-label="下载原图"><Download size={18} /></a>
+              <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} title="下载原图" aria-label="下载原图"><Download size={18} /></a>
               <button className="icon-button dark" onClick={() => setPreview(null)} title="关闭" aria-label="关闭预览"><X size={20} /></button>
             </div>
           </div>

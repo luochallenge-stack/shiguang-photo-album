@@ -1,0 +1,9 @@
+node_modules
+.next
+.vinext
+.git
+.env*
+!.env.example
+dist
+.wrangler
+npm-debug.log*

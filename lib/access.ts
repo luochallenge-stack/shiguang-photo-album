@@ -1,9 +1,4 @@
-import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { ensureSchema, getDb } from "../db";
-import { folderUploadTokens } from "../db/schema";
-
-type AccessEnv = { ALBUM_ADMIN_KEY?: string };
+import { getUploadTokenRecord } from "./cloudbase";
 
 function constantEqual(left: string, right: string): boolean {
   if (!left || left.length !== right.length) return false;
@@ -15,7 +10,7 @@ function constantEqual(left: string, right: string): boolean {
 }
 
 export function isAdminRequest(request: Request): boolean {
-  const configured = (env as unknown as AccessEnv).ALBUM_ADMIN_KEY || "";
+  const configured = process.env.ALBUM_ADMIN_KEY || "";
   const provided = request.headers.get("x-album-admin-key") || "";
   return constantEqual(configured, provided);
 }
@@ -32,20 +27,9 @@ export async function canWriteFolder(
 ): Promise<boolean> {
   if (isAdminRequest(request)) return true;
   if (!folderSlug || !uploadToken) return false;
-  await ensureSchema();
   const tokenHash = await hashUploadToken(uploadToken);
-  const db = getDb();
-  const [match] = await db
-    .select({ folderSlug: folderUploadTokens.folderSlug })
-    .from(folderUploadTokens)
-    .where(
-      and(
-        eq(folderUploadTokens.folderSlug, folderSlug),
-        eq(folderUploadTokens.tokenHash, tokenHash),
-      ),
-    )
-    .limit(1);
-  return Boolean(match);
+  const match = await getUploadTokenRecord(folderSlug);
+  return Boolean(match && constantEqual(match.tokenHash, tokenHash));
 }
 
 export function unauthorized() {

@@ -1,60 +1,43 @@
-import { eq } from "drizzle-orm";
-import { ensureSchema, getDb } from "../../../db";
-import { folders, photos } from "../../../db/schema";
+import { createObjectKey, createPhotoRecord, findFolder, uploadPhoto } from "../../../lib/cloudbase";
 import { canWriteFolder, unauthorized } from "../../../lib/access";
-import { getQiniuConfig, publicObjectUrl } from "../../../lib/qiniu";
+
+const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]);
 
 export async function POST(request: Request) {
   try {
-    await ensureSchema();
-    const payload = (await request.json()) as {
-      folderSlug?: string;
-      objectKey?: string;
-      name?: string;
-      url?: string;
-      size?: number;
-      mimeType?: string;
-      width?: number | null;
-      height?: number | null;
-      uploadToken?: string;
-    };
-    const folderSlug = payload.folderSlug?.trim() || "";
-    const objectKey = payload.objectKey?.trim() || "";
-    if (
-      !folderSlug ||
-      !objectKey.startsWith(`albums/${folderSlug}/`) ||
-      !payload.name ||
-      !payload.mimeType ||
-      !Number.isFinite(payload.size)
-    ) {
+    const form = await request.formData();
+    const file = form.get("file");
+    const folderSlug = String(form.get("folderSlug") || "").trim();
+    const uploadToken = String(form.get("uploadToken") || "");
+    const mimeType = file instanceof File ? file.type : "";
+    const imageExtension = file instanceof File && /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name);
+    if (!(file instanceof File) || !folderSlug || (!IMAGE_TYPES.has(mimeType) && !imageExtension)) {
       return Response.json({ error: "图片信息无效" }, { status: 400 });
     }
-    if (!(await canWriteFolder(request, folderSlug, payload.uploadToken))) return unauthorized();
+    if (file.size > 50 * 1024 * 1024) return Response.json({ error: "单张图片不能超过 50 MB" }, { status: 413 });
+    if (!(await canWriteFolder(request, folderSlug, uploadToken))) return unauthorized();
 
-    const db = getDb();
-    const [folder] = await db
-      .select({ slug: folders.slug })
-      .from(folders)
-      .where(eq(folders.slug, folderSlug))
-      .limit(1);
+    const folder = await findFolder(folderSlug);
     if (!folder) {
       return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
     }
 
-    const [photo] = await db
-      .insert(photos)
-      .values({
-        id: crypto.randomUUID(),
-        folderSlug,
-        objectKey,
-        name: payload.name.slice(0, 180),
-        url: publicObjectUrl(getQiniuConfig().domain, objectKey),
-        size: Math.max(0, Math.round(payload.size || 0)),
-        mimeType: payload.mimeType,
-        width: payload.width || null,
-        height: payload.height || null,
-      })
-      .returning();
+    const objectKey = createObjectKey(folderSlug, file.name);
+    const uploaded = await uploadPhoto(objectKey, Buffer.from(await file.arrayBuffer()));
+    const photo = {
+      id: crypto.randomUUID(),
+      folderSlug,
+      objectKey,
+      fileId: uploaded.fileId,
+      name: file.name.slice(0, 180),
+      url: uploaded.url,
+      size: file.size,
+      mimeType: mimeType || "application/octet-stream",
+      width: Number(form.get("width")) || null,
+      height: Number(form.get("height")) || null,
+      createdAt: new Date().toISOString(),
+    };
+    await createPhotoRecord(photo);
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存图片信息失败";
