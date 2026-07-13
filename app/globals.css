@@ -85,7 +85,7 @@ button { color: inherit; }
 .folder-row:hover { color: white; background: rgba(255,255,255,.07); }
 .folder-row.active { color: #173f37; background: var(--mint); }
 .folder-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.folder-row b { font-size: 11px; font-weight: 700; opacity: .7; }
+.folder-row b { min-width: 14px; display: grid; place-items: center; font-size: 11px; font-weight: 700; opacity: .7; }
 
 .admin-access {
   min-height: 38px;
@@ -274,6 +274,21 @@ button { color: inherit; }
 .empty-visual span:nth-child(2) { left: 47px; top: 1px; z-index: 2; color: white; background: var(--coral); }
 .empty-visual span:nth-child(3) { right: 5px; top: 14px; color: #6b5210; background: var(--yellow); transform: rotate(9deg); }
 
+.locked-state {
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 20px;
+  text-align: center;
+}
+.lock-visual { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 8px; color: var(--forest); background: var(--mint); }
+.locked-state h2 { margin: 18px 0 7px; font-size: 18px; }
+.locked-state p { margin: 0; color: var(--muted); font-size: 12px; }
+.unlock-form { width: min(370px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 20px; }
+.unlock-form .primary-button { height: 42px; }
+
 .upload-panel { position: fixed; z-index: 45; right: 20px; bottom: 20px; width: min(380px, calc(100vw - 40px)); overflow: hidden; border: 1px solid #d9dfdc; border-radius: 8px; background: white; box-shadow: 0 18px 44px rgba(19,43,36,.2); }
 .upload-panel-title { min-height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 6px 9px 6px 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .upload-task { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border-bottom: 1px solid #edf0ee; }
@@ -298,10 +313,14 @@ button { color: inherit; }
 .dialog-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; color: var(--forest); background: var(--mint); }
 .dialog-icon.danger { color: var(--danger); background: #fff0ee; }
 .dialog-message { margin: -2px 0 0; color: #59615f; font-size: 13px; line-height: 1.65; }
+.security-message { margin: -8px 0 18px; }
 .field-label { display: block; margin-bottom: 7px; color: #4b5552; font-size: 11px; font-weight: 700; }
 .text-input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #cfd7d3; border-radius: 6px; outline: none; font-size: 13px; }
 .text-input:focus { border-color: #729a8f; box-shadow: 0 0 0 3px rgba(36,86,75,.09); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.security-actions { align-items: center; }
+.remove-lock-button { margin-right: auto; color: var(--danger); }
+.remove-lock-button:hover { border-color: #ecc8c4; color: var(--danger); background: #fff0ee; }
 
 .preview-overlay { position: fixed; z-index: 80; inset: 0; display: grid; grid-template-rows: 64px minmax(0, 1fr); color: white; background: #111715; }
 .preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 18px; border-bottom: 1px solid rgba(255,255,255,.1); background: #19211e; }
@@ -320,7 +339,7 @@ button { color: inherit; }
   .app-shell { grid-template-columns: 188px minmax(0, 1fr); }
   .sidebar { padding-inline: 10px; }
   .topbar, .content { padding-left: 18px; padding-right: 18px; }
-  .secondary-button { width: 38px; padding: 0; font-size: 0; }
+  .top-actions > .secondary-button { width: 38px; padding: 0; font-size: 0; }
   .photo-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 }
 
@@ -339,7 +358,7 @@ button { color: inherit; }
   .breadcrumb { display: none; }
   .top-actions { width: 100%; }
   .search-box { min-width: 0; width: auto; flex: 1; }
-  .primary-button { width: 40px; padding: 0; font-size: 0; }
+  .top-actions > .primary-button { width: 40px; padding: 0; font-size: 0; }
   .content { padding: 20px 14px 36px; }
   .section-heading h1 { font-size: 22px; }
   .drop-zone small { display: none; }
@@ -349,6 +368,9 @@ button { color: inherit; }
   .photo-meta span { font-size: 9px; }
   .photo-list .photo-card { grid-template-columns: 78px minmax(0, 1fr); }
   .upload-panel { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+  .unlock-form { grid-template-columns: 1fr; }
+  .security-actions { flex-wrap: wrap; }
+  .remove-lock-button { width: 100%; margin-right: 0; }
 }
 
 @media (max-width: 390px) {

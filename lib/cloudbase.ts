@@ -5,6 +5,7 @@ export type AlbumFolder = {
   name: string;
   slug: string;
   createdAt: string;
+  passwordHash?: string;
 };
 
 export type AlbumPhoto = {
@@ -83,6 +84,10 @@ export async function createFolderRecord(folder: AlbumFolder): Promise<void> {
   await database().collection(COLLECTIONS.folders).doc(folder.id).set(folder);
 }
 
+export async function updateFolderPasswordHash(id: string, passwordHash: string): Promise<void> {
+  await database().collection(COLLECTIONS.folders).doc(id).update({ passwordHash });
+}
+
 export async function listPhotos(folderSlug?: string): Promise<AlbumPhoto[]> {
   const collection = database().collection(COLLECTIONS.photos);
   const query = folderSlug ? collection.where({ folderSlug }) : collection;
@@ -151,7 +156,7 @@ export async function resolvePhotoUrls(fileIds: string[]): Promise<string[]> {
   for (let index = 0; index < fileIds.length; index += 50) {
     const batch = fileIds.slice(index, index + 50);
     const result = await cloudbase.getTempFileURL({
-      fileList: batch.map((fileID) => ({ fileID, maxAge: 7200 })),
+      fileList: batch.map((fileID) => ({ fileID, maxAge: 600 })),
     });
     for (const item of result.fileList || []) {
       if (item.fileID && item.tempFileURL) urls.set(item.fileID, item.tempFileURL);

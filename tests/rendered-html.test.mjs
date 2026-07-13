@@ -3,9 +3,11 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("builds the finished photo album surface", async () => {
-  const [page, layout] = await Promise.all([
+  const [page, layout, accessControl, libraryRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
     access(new URL("../.next/standalone/server.js", import.meta.url)),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
@@ -18,6 +20,14 @@ test("builds the finished photo album surface", async () => {
   assert.match(page, /api\/folders\/share/);
   assert.match(page, /重命名照片/);
   assert.match(page, /删除照片/);
+  assert.match(page, /这个文件夹已加密/);
+  assert.match(page, /设置密码/);
+  assert.match(page, /api\/folders\/unlock/);
+  assert.match(accessControl, /PBKDF2/);
+  assert.match(accessControl, /HttpOnly; Secure; SameSite=Lax/);
+  assert.match(libraryRoute, /folderLocked/);
+  assert.match(libraryRoute, /lockedSlugs/);
+  assert.doesNotMatch(libraryRoute, /\.\.\.folder/);
   assert.doesNotMatch(page + layout, /codex-preview|Your site is taking shape/);
 });
 

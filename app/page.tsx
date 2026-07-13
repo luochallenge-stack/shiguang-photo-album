@@ -14,6 +14,8 @@ import {
   LayoutList,
   Link2,
   KeyRound,
+  LockKeyhole,
+  LockOpen,
   LoaderCircle,
   Maximize2,
   Pencil,
@@ -33,6 +35,7 @@ type FolderItem = {
   slug: string;
   photoCount: number;
   createdAt: string;
+  locked: boolean;
 };
 
 type PhotoItem = {
@@ -60,6 +63,7 @@ type LibraryResponse = {
   folders: FolderItem[];
   photos: PhotoItem[];
   storageConfigured: boolean;
+  folderLocked: boolean;
 };
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -188,6 +192,12 @@ export default function Home() {
   const [editingName, setEditingName] = useState("");
   const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
   const [savingPhoto, setSavingPhoto] = useState(false);
+  const [folderLocked, setFolderLocked] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState("");
+  const [unlockingFolder, setUnlockingFolder] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [securityPassword, setSecurityPassword] = useState("");
+  const [savingSecurity, setSavingSecurity] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
@@ -207,37 +217,49 @@ export default function Home() {
     if (remember) sessionStorage.setItem("album-admin-key", candidate);
   };
 
-  const loadLibrary = useCallback(async (folder = selectedFolder) => {
+  const loadLibrary = useCallback(async (folder = selectedFolder, key = adminKey) => {
     setLoading(true);
     setError("");
     try {
       const query = folder ? `?folder=${encodeURIComponent(folder)}` : "";
-      const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`));
+      const data = await readJson<LibraryResponse>(await fetch(`/api/library${query}`, {
+        headers: key ? { "x-album-admin-key": key } : {},
+      }));
       setFolders(data.folders);
       setPhotos(data.photos);
       setStorageConfigured(data.storageConfigured);
+      setFolderLocked(data.folderLocked);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "读取相册失败");
     } finally {
       setLoading(false);
     }
-  }, [selectedFolder]);
+  }, [adminKey, selectedFolder]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const fromUrl = params.get("folder") || "";
     const uploadToken = params.get("upload") || "";
     const initialize = window.setTimeout(() => {
-      if (fromUrl) setSelectedFolder(fromUrl);
-      if (fromUrl && uploadToken) {
-        setSharedFolder(fromUrl);
-        setSharedUploadToken(uploadToken);
-      }
-      const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
-      if (savedAdminKey) {
-        void verifyAdminKey(savedAdminKey, false).catch(() => sessionStorage.removeItem("album-admin-key"));
-      }
-      void loadLibrary(fromUrl);
+      const run = async () => {
+        if (fromUrl) setSelectedFolder(fromUrl);
+        if (fromUrl && uploadToken) {
+          setSharedFolder(fromUrl);
+          setSharedUploadToken(uploadToken);
+        }
+        const savedAdminKey = sessionStorage.getItem("album-admin-key") || "";
+        if (savedAdminKey) {
+          try {
+            await verifyAdminKey(savedAdminKey, false);
+            await loadLibrary(fromUrl, savedAdminKey);
+            return;
+          } catch {
+            sessionStorage.removeItem("album-admin-key");
+          }
+        }
+        await loadLibrary(fromUrl, "");
+      };
+      void run();
     }, 0);
     return () => window.clearTimeout(initialize);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -254,12 +276,16 @@ export default function Home() {
   );
 
   const chooseFolder = (slug: string) => {
+    setPhotos([]);
+    setPreview(null);
+    setFolderLocked(false);
+    setUnlockPassword("");
     setSelectedFolder(slug);
     const url = new URL(window.location.href);
     if (slug) url.searchParams.set("folder", slug);
     else url.searchParams.delete("folder");
     window.history.replaceState({}, "", url);
-    void loadLibrary(slug);
+    void loadLibrary(slug, adminKey);
   };
 
   const createFolder = async () => {
@@ -382,6 +408,7 @@ export default function Home() {
     setError("");
     try {
       await verifyAdminKey(candidate);
+      await loadLibrary(selectedFolder, candidate);
       setAdminInput("");
       setAdminOpen(false);
     } catch (cause) {
@@ -395,6 +422,73 @@ export default function Home() {
     sessionStorage.removeItem("album-admin-key");
     setAdminKey("");
     setIsAdmin(false);
+    setPhotos([]);
+    setPreview(null);
+    void loadLibrary(selectedFolder, "");
+  };
+
+  const unlockFolder = async () => {
+    if (!selectedFolder || !unlockPassword) return;
+    setUnlockingFolder(true);
+    setError("");
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch("/api/folders/unlock", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ folderSlug: selectedFolder, password: unlockPassword }),
+        }),
+      );
+      setUnlockPassword("");
+      await loadLibrary(selectedFolder, "");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "解锁文件夹失败");
+    } finally {
+      setUnlockingFolder(false);
+    }
+  };
+
+  const saveFolderPassword = async () => {
+    if (!selectedFolder || securityPassword.length < 4) return;
+    setSavingSecurity(true);
+    setError("");
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch("/api/folders", {
+          method: "PATCH",
+          headers: adminHeaders(true),
+          body: JSON.stringify({ folderSlug: selectedFolder, password: securityPassword }),
+        }),
+      );
+      setSecurityPassword("");
+      setSecurityOpen(false);
+      await loadLibrary(selectedFolder, adminKey);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "设置文件夹密码失败");
+    } finally {
+      setSavingSecurity(false);
+    }
+  };
+
+  const removeFolderPassword = async () => {
+    if (!selectedFolder) return;
+    setSavingSecurity(true);
+    setError("");
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch(`/api/folders?folderSlug=${encodeURIComponent(selectedFolder)}`, {
+          method: "DELETE",
+          headers: adminHeaders(),
+        }),
+      );
+      setSecurityPassword("");
+      setSecurityOpen(false);
+      await loadLibrary(selectedFolder, adminKey);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "移除文件夹密码失败");
+    } finally {
+      setSavingSecurity(false);
+    }
   };
 
   const openRename = (photo: PhotoItem) => {
@@ -484,9 +578,11 @@ export default function Home() {
               className={`folder-row ${selectedFolder === folder.slug ? "active" : ""}`}
               onClick={() => chooseFolder(folder.slug)}
             >
-              {selectedFolder === folder.slug ? <FolderOpen size={18} /> : <Folder size={18} />}
+              {folder.locked
+                ? <LockKeyhole size={18} />
+                : selectedFolder === folder.slug ? <FolderOpen size={18} /> : <Folder size={18} />}
               <span>{folder.name}</span>
-              <b>{folder.photoCount}</b>
+              <b>{folder.locked ? <LockKeyhole size={13} aria-label="已加密" /> : folder.photoCount}</b>
             </button>
           ))}
         </nav>
@@ -529,6 +625,15 @@ export default function Home() {
                 {copiedUpload ? "已复制" : "上传链接"}
               </button>
             )}
+            {selectedFolder && isAdmin && (
+              <button
+                className="secondary-button"
+                onClick={() => { setSecurityPassword(""); setSecurityOpen(true); }}
+              >
+                <LockKeyhole size={17} />
+                {activeFolder?.locked ? "更换密码" : "设置密码"}
+              </button>
+            )}
             <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片" : "需要上传权限"}>
               <Upload size={18} /> 上传照片
             </button>
@@ -559,12 +664,12 @@ export default function Home() {
           <div className="section-heading">
             <div>
               <h1>{activeFolder?.name || "全部照片"}</h1>
-              <p>{visiblePhotos.length} 张照片</p>
+              <p>{folderLocked ? "需要密码访问" : `${visiblePhotos.length} 张照片`}</p>
             </div>
-            <div className="view-toggle" aria-label="视图切换">
+            {!folderLocked && <div className="view-toggle" aria-label="视图切换">
               <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="网格视图" aria-label="网格视图"><Grid2X2 size={17} /></button>
               <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")} title="列表视图" aria-label="列表视图"><LayoutList size={18} /></button>
-            </div>
+            </div>}
           </div>
 
           {canUpload && (
@@ -584,6 +689,28 @@ export default function Home() {
 
           {loading ? (
             <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取照片</div>
+          ) : folderLocked ? (
+            <section className="locked-state" aria-labelledby="locked-folder-title">
+              <span className="lock-visual"><LockKeyhole size={30} /></span>
+              <h2 id="locked-folder-title">这个文件夹已加密</h2>
+              <p>输入密码后即可查看和下载其中的照片。</p>
+              <form className="unlock-form" onSubmit={(event) => { event.preventDefault(); void unlockFolder(); }}>
+                <input
+                  className="text-input"
+                  type="password"
+                  value={unlockPassword}
+                  onChange={(event) => setUnlockPassword(event.target.value)}
+                  autoComplete="current-password"
+                  placeholder="文件夹密码"
+                  aria-label="文件夹密码"
+                  autoFocus
+                />
+                <button className="primary-button" type="submit" disabled={!unlockPassword || unlockingFolder}>
+                  {unlockingFolder ? <LoaderCircle className="spin" size={17} /> : <KeyRound size={17} />}
+                  解锁
+                </button>
+              </form>
+            </section>
           ) : visiblePhotos.length ? (
             <div className={viewMode === "grid" ? "photo-grid" : "photo-list"}>
               {visiblePhotos.map((photo) => (
@@ -686,6 +813,49 @@ export default function Home() {
               <button className="secondary-button" onClick={() => setAdminOpen(false)}>取消</button>
               <button className="primary-button" disabled={!adminInput.trim() || verifyingAdmin} onClick={() => void unlockAdmin()}>
                 {verifyingAdmin ? <LoaderCircle className="spin" size={17} /> : <KeyRound size={17} />} 进入管理
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {securityOpen && activeFolder && (
+        <div className="modal-backdrop" onMouseDown={() => !savingSecurity && setSecurityOpen(false)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="folder-security-title">
+            <div className="dialog-heading">
+              <div>
+                <span className="dialog-icon"><LockKeyhole size={19} /></span>
+                <h2 id="folder-security-title">{activeFolder.locked ? "更换文件夹密码" : "设置文件夹密码"}</h2>
+              </div>
+              <button className="icon-button" disabled={savingSecurity} onClick={() => setSecurityOpen(false)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <p className="dialog-message security-message">
+              加锁后，文件夹中的照片不会出现在全部照片中，访问该文件夹需要输入密码。
+            </p>
+            <label className="field-label" htmlFor="folder-password">{activeFolder.locked ? "新密码" : "文件夹密码"}</label>
+            <input
+              id="folder-password"
+              className="text-input"
+              type="password"
+              minLength={4}
+              maxLength={128}
+              autoFocus
+              autoComplete="new-password"
+              value={securityPassword}
+              onChange={(event) => setSecurityPassword(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") void saveFolderPassword(); }}
+              placeholder="至少 4 个字符"
+            />
+            <div className="dialog-actions security-actions">
+              {activeFolder.locked && (
+                <button className="secondary-button remove-lock-button" disabled={savingSecurity} onClick={() => void removeFolderPassword()}>
+                  <LockOpen size={17} /> 移除密码
+                </button>
+              )}
+              <button className="secondary-button" disabled={savingSecurity} onClick={() => setSecurityOpen(false)}>取消</button>
+              <button className="primary-button" disabled={securityPassword.length < 4 || savingSecurity} onClick={() => void saveFolderPassword()}>
+                {savingSecurity ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />}
+                {activeFolder.locked ? "更换密码" : "加密文件夹"}
               </button>
             </div>
           </section>
