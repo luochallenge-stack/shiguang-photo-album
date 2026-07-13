@@ -2,6 +2,8 @@
 
 一个需要账号登录、受控管理的在线影像集：支持站内注册登录、用户角色、访问与修改日志、虚拟文件夹、文件夹密码、批量照片/视频上传、上传进度、网格/列表浏览、在线播放、重命名、删除、复制文件夹链接和下载。
 
+面向后续开发者和 AI 编码代理的架构、核心文件、权限边界与发布说明见 [`develop.md`](./develop.md)。
+
 照片支持 JPEG、PNG、WebP、GIF、HEIC、HEIF，单张最大 50 MB；视频支持 MP4、MOV、M4V、WebM、MPEG，单个最大 500 MB。浏览器使用服务端签发的单文件临时凭证直传 CloudBase 云存储，避免大文件经过云托管请求体。
 
 线上地址：<https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com/>
