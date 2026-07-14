@@ -134,7 +134,7 @@ test("paginates CloudBase media queries by album for both clients", async () => 
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {
-  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute, libraryTemplate, folderOrderRoute, folderNameRoute, coverRoute, cloudbase] = await Promise.all([
+  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute, libraryTemplate, folderOrderRoute, folderNameRoute, coverRoute, generateCoverRoute, videoCover, dockerfile, cloudbase] = await Promise.all([
     readFile(new URL("../miniprogram/project.config.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/app.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/utils/api.js", import.meta.url), "utf8"),
@@ -150,6 +150,9 @@ test("ships a native WeChat mini program with token authentication", async () =>
     readFile(new URL("../app/api/folders/order/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/folders/name/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/cover/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/cover/generate/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/video-cover.ts", import.meta.url), "utf8"),
+    readFile(new URL("../Dockerfile", import.meta.url), "utf8"),
     readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
     access(new URL("../miniprogram/images/logo.png", import.meta.url)),
   ]);
@@ -188,8 +191,13 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /thumbTempFilePath/);
   assert.match(library, /api\.uploadVideoCover/);
   assert.match(api, /\/api\/photos\/cover/);
+  assert.match(api, /generateVideoCover/);
   assert.match(coverRoute, /updatePhotoCoverFileId/);
+  assert.match(generateCoverRoute, /extractVideoCoverFromUrl/);
+  assert.match(videoCover, /spawn\("ffmpeg"/);
+  assert.match(dockerfile, /apk add --no-cache ffmpeg/);
   assert.match(libraryRoute, /coverUrls/);
+  assert.match(libraryRoute, /\? coverUrl/);
   assert.match(cloudbase, /coverFileId/);
   assert.match(cloudbase, /mediaFileIds/);
   assert.match(library, /onReachBottom/);

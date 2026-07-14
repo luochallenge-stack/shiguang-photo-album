@@ -11,6 +11,7 @@ import { canWriteFolder, unauthorized } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
+import { extractVideoCover } from "../../../lib/video-cover";
 
 const RECYCLE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -38,10 +39,22 @@ export async function POST(request: Request) {
     }
 
     const objectKey = createObjectKey(folderSlug, name);
-    const uploaded = await uploadPhoto(objectKey, Buffer.from(await file.arrayBuffer()));
+    const contents = Buffer.from(await file.arrayBuffer());
+    const uploaded = await uploadPhoto(objectKey, contents);
     const createdAt = new Date().toISOString();
+    const id = crypto.randomUUID();
+    let coverFileId = "";
+    if (media.kind === "video") {
+      try {
+        const cover = await extractVideoCover(contents);
+        const uploadedCover = await uploadPhoto(createObjectKey(folderSlug, `${id}-cover.jpg`), cover);
+        coverFileId = uploadedCover.fileId;
+      } catch (error) {
+        console.error("Failed to generate video cover during upload", error);
+      }
+    }
     const photo = {
-      id: crypto.randomUUID(),
+      id,
       folderSlug,
       objectKey,
       fileId: uploaded.fileId,
@@ -51,6 +64,7 @@ export async function POST(request: Request) {
       mimeType: media.mimeType,
       width: Number(form.get("width")) || null,
       height: Number(form.get("height")) || null,
+      ...(coverFileId ? { coverFileId } : {}),
       createdAt,
       deletedAt: "",
       purgeAt: "",

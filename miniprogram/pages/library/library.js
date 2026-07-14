@@ -9,6 +9,7 @@ const PICKER_BATCH_SIZE = 9;
 const MAX_BATCH_ACTION_COUNT = 100;
 let libraryRequestId = 0;
 let pendingUploadFiles = [];
+const generatingCoverIds = new Set();
 
 function formatSize(value) {
   if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
@@ -201,9 +202,10 @@ Page({
             selected: false,
           };
         });
+        const nextPhotos = append ? this.data.photos.concat(photos) : photos;
         this.setData({
           folders: payload.folders,
-          photos: append ? this.data.photos.concat(photos) : photos,
+          photos: nextPhotos,
           total: Number(payload.total) || 0,
           selectedFolder: folderSlug,
           selectedFolderName: recycleMode ? "回收站" : selected ? selected.name : "全部影像",
@@ -220,6 +222,10 @@ Page({
           batchMoveOpen: false,
           recycleMode,
           recycleCount: Number(payload.recycleCount) || 0,
+        }, () => {
+          if (this.data.user.role === "admin" && !recycleMode) {
+            this.generateMissingVideoCovers(nextPhotos);
+          }
         });
       })
       .catch((error) => {
@@ -232,6 +238,28 @@ Page({
         this.setData({ loading: false, loadingMore: false, error: error.message || "读取相册失败" });
       })
       .finally(() => wx.stopPullDownRefresh());
+  },
+
+  async generateMissingVideoCovers(photos) {
+    const missing = photos
+      .filter((photo) => photo.video && !photo.thumbnailUrl && !generatingCoverIds.has(photo.id))
+      .slice(0, 2);
+    for (const photo of missing) {
+      generatingCoverIds.add(photo.id);
+      try {
+        const result = await api.generateVideoCover(photo.id);
+        const thumbnailUrl = mediaUrl(result.coverUrl);
+        if (thumbnailUrl) {
+          this.setData({
+            photos: this.data.photos.map((item) => item.id === photo.id ? { ...item, thumbnailUrl } : item),
+          });
+        }
+      } catch (error) {
+        console.error("生成历史视频封面失败", photo.id, error);
+      } finally {
+        generatingCoverIds.delete(photo.id);
+      }
+    }
   },
 
   chooseFolder(event) {
@@ -834,7 +862,7 @@ Page({
           const overall = Math.round(((index * 100) + progress) / files.length);
           this.setData({ uploadProgress: overall });
         });
-        if (isVideoFile(file)) {
+        if (isVideoFile(file) && !(result.photo && result.photo.coverFileId)) {
           const photoId = result.photo && result.photo.id;
           if (photoId && file.thumbTempFilePath) {
             this.setData({ uploadLabel: `正在保存视频封面 ${index + 1}/${files.length}` });
@@ -843,7 +871,8 @@ Page({
                 photoId,
                 name: `视频封面-${photoId}.jpg`,
               });
-            } catch {
+            } catch (error) {
+              console.error("保存视频封面失败", photoId, error);
               coverFailures += 1;
             }
           } else {

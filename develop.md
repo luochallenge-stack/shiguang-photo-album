@@ -161,7 +161,8 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 3. 客户端提前拒绝超过 50 MB 的图片和超过 500 MB 的视频；大于 8 MB 的图片使用 `wx.compressImage`，视频不压缩。
 4. `wx.uploadFile` 以 multipart 请求调用 `POST /api/photos`。
 5. 服务端读取文件、校验管理员权限、上传云存储并写入数据库。
-6. 视频上传成功后，小程序把 `wx.chooseMedia` 返回的首帧缩略图上传到 `POST /api/photos/cover`，列表通过 `coverFileId` 获取临时封面地址。
+6. 服务端使用 FFmpeg 自动抽取视频首帧并写入 `coverFileId`；若自动抽取失败，小程序再把 `wx.chooseMedia` 返回的 `thumbTempFilePath` 上传到 `POST /api/photos/cover`。
+7. 历史视频没有 `coverFileId` 时，管理员小程序会按当前页每次最多两条调用 `POST /api/photos/cover/generate` 补生成，避免一次请求处理过多视频。
 
 该链路会让文件内容经过 CloudBase Run 并在服务端转为 Buffer，因此虽然功能上允许视频，长视频或接近 500 MB 上限的文件仍可能受网络、超时和请求体限制。需要稳定支持大视频时，应改为小程序可用的云存储直传，而不是继续放宽 multipart 限制。
 
@@ -276,7 +277,8 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 所有 `wx.request` 自动添加 Bearer 令牌和 `x-album-client`。
 - 加密文件夹请求按需添加 `x-album-folder-token`。
 - `uploadMedia` 封装照片/视频的 `wx.uploadFile` 和上传进度，单文件超时为 10 分钟。
-- `uploadVideoCover` 在视频登记成功后上传 `thumbTempFilePath`，封面失败不会重复上传原视频。
+- `uploadVideoCover` 只在服务端没有成功生成封面时上传 `thumbTempFilePath`，封面失败不会重复上传原视频。
+- `generateVideoCover` 为历史视频请求服务端补生成首帧封面，超时为 2 分钟。
 
 ### `pages/login`
 

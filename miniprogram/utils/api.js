@@ -37,7 +37,7 @@ function request(path, options = {}) {
       method: options.method || "GET",
       data: options.data,
       header,
-      timeout: 20000,
+      timeout: options.timeout || 20000,
       success(response) {
         const payload = response.data || {};
         if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -99,6 +99,14 @@ function uploadVideoCover(filePath, formData) {
   return uploadFile("/api/photos/cover", filePath, formData);
 }
 
+function generateVideoCover(photoId) {
+  return request("/api/photos/cover/generate", {
+    method: "POST",
+    data: { photoId },
+    timeout: 120000,
+  });
+}
+
 function authenticate(mode, data) {
   return request(`/api/auth/${mode}`, { method: "POST", data }).then((payload) => {
     if (!payload.sessionToken || !payload.user) throw new Error("服务器没有返回小程序登录凭证");
@@ -113,6 +121,7 @@ module.exports = {
   authenticate,
   clearSession,
   currentUser,
+  generateVideoCover,
   getSessionToken,
   request,
   saveSession,

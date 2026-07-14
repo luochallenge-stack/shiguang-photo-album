@@ -93,7 +93,7 @@ export async function GET(request: Request) {
           url: resolvedUrl,
           coverUrl,
           thumbnailUrl: coverUrl
-            ? thumbnailUrl(coverUrl, "image/jpeg")
+            ? coverUrl
             : thumbnailUrl(resolvedUrl, photo.mimeType),
         };
       }),
