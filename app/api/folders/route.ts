@@ -6,7 +6,7 @@ import {
   type FolderVisibilityType,
 } from "../../../lib/cloudbase";
 import { folderSlug, normalizeFolderName } from "../../../lib/validation";
-import { canManageFolderVisibility, folderVisibilityType } from "../../../lib/access";
+import { canManageFolders, canManageFolderVisibility, folderVisibilityType } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 
@@ -46,7 +46,7 @@ async function validatedVisibleUserIds(
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canManageFolders(user)) return forbidden();
   try {
     const payload = (await request.json()) as {
       name?: string;

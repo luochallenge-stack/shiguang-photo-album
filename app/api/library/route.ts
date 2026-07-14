@@ -10,6 +10,8 @@ import {
 } from "../../../lib/cloudbase";
 import {
   canManageFolderVisibility,
+  canDeleteMedia,
+  canReadAlbum,
   canUserReadFolder,
   folderVisibilityType,
 } from "../../../lib/access";
@@ -28,11 +30,12 @@ function thumbnailUrl(url: string, mimeType: string): string {
 export async function GET(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
+  if (!canReadAlbum(user)) return forbidden();
   try {
     const url = new URL(request.url);
     const selectedFolder = url.searchParams.get("folder")?.trim();
     const recycleBin = url.searchParams.get("recycle") === "1";
-    if (recycleBin && user.role !== "admin") return forbidden();
+    if (recycleBin && !canDeleteMedia(user)) return forbidden();
     await purgeExpiredPhotos().catch((error) => console.error("Failed to purge recycled photos", error));
     const requestedLimit = Number(url.searchParams.get("limit"));
     const defaultLimit = isMiniProgramRequest(request) ? MINI_PROGRAM_PAGE_SIZE : WEB_PAGE_SIZE;

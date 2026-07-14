@@ -1,5 +1,5 @@
 import { listFolders, updateFolderSortOrders } from "../../../../lib/cloudbase";
-import { canUserReadFolder } from "../../../../lib/access";
+import { canManageFolders, canUserReadFolder } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
@@ -15,7 +15,7 @@ function folderSlugs(value: unknown): string[] {
 export async function PATCH(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canManageFolders(user)) return forbidden();
   try {
     const body = (await request.json()) as { folderSlugs?: unknown };
     const slugs = folderSlugs(body.folderSlugs);

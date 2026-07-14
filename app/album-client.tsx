@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Clipboard,
+  Crown,
   Download,
   Folder,
   FolderOpen,
@@ -34,7 +35,7 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useSta
 import NextImage from "next/image";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
 import type { PublicAlbumUser } from "@/lib/auth";
-import type { AlbumAuditLog, FolderVisibilityType } from "@/lib/cloudbase";
+import type { AlbumAuditLog, AlbumUserPermissions, FolderVisibilityType } from "@/lib/cloudbase";
 
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
@@ -91,6 +92,17 @@ type LibraryResponse = {
 };
 
 type AdminSection = "users" | "logs";
+type ManagedAlbumUser = Pick<PublicAlbumUser, "id" | "accountLabel" | "displayName" | "title" | "avatarUrl">
+  & Partial<Pick<PublicAlbumUser, "provider" | "role" | "permissions" | "status" | "createdAt" | "lastLoginAt">>;
+
+const PERMISSION_OPTIONS: Array<{ key: keyof AlbumUserPermissions; label: string }> = [
+  { key: "read", label: "访问" },
+  { key: "upload", label: "上传" },
+  { key: "edit", label: "编辑" },
+  { key: "delete", label: "删除" },
+  { key: "manageFolders", label: "文件夹" },
+  { key: "assignTitles", label: "赋予称号" },
+];
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { error?: string };
@@ -129,6 +141,13 @@ function providerLabel(provider: PublicAlbumUser["provider"]): string {
   return provider === "local" ? "站内账号" : "管理员口令";
 }
 
+function permissionSummary(permissions: AlbumUserPermissions): string {
+  if (permissions.manageFolders) return "文件夹管理者";
+  if (permissions.upload) return "可上传用户";
+  if (permissions.read) return "访问用户";
+  return "暂无访问权限";
+}
+
 const ACTION_LABELS: Record<string, string> = {
   "auth.login": "登录相册",
   "auth.register": "注册账号",
@@ -159,12 +178,12 @@ const VISIBILITY_OPTIONS: Array<{
   description: string;
 }> = [
   { type: "all", title: "所有人可见", description: "任何已注册用户都能看到" },
-  { type: "admins", title: "管理员可见", description: "只对管理员展示" },
+  { type: "admins", title: "管理者可见", description: "只对拥有文件夹管理权限的人展示" },
   { type: "specific", title: "某些人可见", description: "仅向勾选的用户展示" },
 ];
 
 function visibilityLabel(type: FolderVisibilityType): string {
-  if (type === "admins") return "管理员可见";
+  if (type === "admins") return "管理者可见";
   if (type === "specific") return "指定用户可见";
   return "所有人可见";
 }
@@ -228,7 +247,7 @@ function VisibilityFields({
                 onChange={() => toggleUser(user.id)}
               />
               <span><strong>{user.displayName}</strong><small>{user.accountLabel}</small></span>
-              <b>{user.role === "admin" ? "管理员" : "成员"}</b>
+              <b>{permissionSummary(user.permissions)}</b>
             </label>
           ))}
           {!users.length && <p>正在读取用户列表...</p>}
@@ -405,7 +424,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [copiedUpload, setCopiedUpload] = useState(false);
   const [activeView, setActiveView] = useState<"album" | "admin">("album");
   const [adminSection, setAdminSection] = useState<AdminSection>("users");
-  const [managedUsers, setManagedUsers] = useState<PublicAlbumUser[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedAlbumUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AlbumAuditLog[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [sharedFolder, setSharedFolder] = useState("");
@@ -427,8 +446,14 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [savingVisibility, setSavingVisibility] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const libraryRequestId = useRef(0);
-  const isAdmin = initialUser.role === "admin";
-  const isSuperAdmin = initialUser.provider === "admin" && isAdmin;
+  const isSuperAdmin = initialUser.accountLabel === "alishan-tea";
+  const canDirectUpload = initialUser.permissions.upload;
+  const canEditMedia = initialUser.permissions.edit;
+  const canDeleteMedia = initialUser.permissions.delete;
+  const canManageFolders = initialUser.permissions.manageFolders;
+  const canAssignTitles = initialUser.permissions.assignTitles;
+  const canOpenPeople = isSuperAdmin || canAssignTitles;
+  const canBatchEdit = canEditMedia || canDeleteMedia;
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
     ...(contentType ? { "content-type": "application/json" } : {}),
@@ -506,7 +531,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     [folders, selectedFolder, showRecycleBin],
   );
   const canUpload = Boolean(
-    !showRecycleBin && selectedFolder && (isAdmin || (sharedUploadToken && sharedFolder === selectedFolder)),
+    !showRecycleBin && selectedFolder && (canDirectUpload || (sharedUploadToken && sharedFolder === selectedFolder)),
   );
 
   const chooseFolder = (slug: string) => {
@@ -624,7 +649,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         const dimensions = await mediaDimensions(file);
         await uploadToCloudBase(
           selectedFolder,
-          isAdmin ? "" : sharedUploadToken,
+          canDirectUpload ? "" : sharedUploadToken,
           file,
           dimensions,
           (progress) => updateUpload(uploadId, { progress }),
@@ -661,7 +686,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const copyUploadLink = async () => {
-    if (!selectedFolder || !isAdmin) return;
+    if (!selectedFolder || !canManageFolders) return;
     setError("");
     try {
       const result = await readJson<{ uploadToken: string }>(
@@ -905,13 +930,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const loadAdminData = async (section: AdminSection = adminSection) => {
-    if (!isAdmin) return;
+    if (section === "users" && !canOpenPeople) return;
     if (section === "logs" && !isSuperAdmin) return;
     setAdminLoading(true);
     setError("");
     try {
       if (section === "users") {
-        const result = await readJson<{ users: PublicAlbumUser[] }>(await fetch("/api/admin/users"));
+        const result = await readJson<{ users: ManagedAlbumUser[] }>(await fetch("/api/admin/users"));
         setManagedUsers(result.users);
       } else {
         const result = await readJson<{ logs: AlbumAuditLog[] }>(await fetch("/api/admin/audit-logs?limit=200"));
@@ -938,8 +963,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const updateManagedUser = async (
-    target: PublicAlbumUser,
-    changes: Partial<Pick<PublicAlbumUser, "role" | "status">>,
+    target: ManagedAlbumUser,
+    changes: { permissions?: AlbumUserPermissions; status?: PublicAlbumUser["status"]; title?: string },
   ) => {
     setError("");
     try {
@@ -952,6 +977,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "更新用户权限失败");
     }
+  };
+
+  const toggleManagedPermission = (target: ManagedAlbumUser, key: keyof AlbumUserPermissions, checked: boolean) => {
+    if (!isSuperAdmin || !target.permissions || target.accountLabel === "alishan-tea") return;
+    void updateManagedUser(target, { permissions: { ...target.permissions, [key]: checked } });
   };
 
   return (
@@ -968,7 +998,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         <nav className="folder-nav" aria-label="相册文件夹">
           <div className="nav-heading">
             <span>文件夹</span>
-            {isAdmin && (
+            {canManageFolders && (
               <button className="icon-button inverse" onClick={openNewFolder} title="新建文件夹" aria-label="新建文件夹">
                 <Plus size={17} />
               </button>
@@ -995,17 +1025,17 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <b>{folder.photoCount}</b>
             </button>
           ))}
-          {isAdmin && (
+          {canDeleteMedia && (
             <button className={`folder-row recycle-row ${showRecycleBin ? "active" : ""}`} onClick={chooseRecycleBin}>
               <Trash2 size={18} />
               <span>回收站</span>
               <b>{recycleCount}</b>
             </button>
           )}
-          {isAdmin && (
+          {canOpenPeople && (
             <button className={`folder-row admin-nav-row ${activeView === "admin" ? "active" : ""}`} onClick={() => openAdminView("users")}>
               <Users size={18} />
-              <span>{isSuperAdmin ? "用户与日志" : "用户管理"}</span>
+              <span>{isSuperAdmin ? "权限与日志" : "称号管理"}</span>
               <ShieldCheck size={14} />
             </button>
           )}
@@ -1016,8 +1046,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             {initialUser.avatarUrl ? <img src={initialUser.avatarUrl} alt="" /> : <UserRound size={18} />}
           </span>
           <span className="user-copy">
-            <strong>{initialUser.displayName}</strong>
-            <small>{providerLabel(initialUser.provider)} · {isAdmin ? "管理员" : "成员"}</small>
+            <strong>{initialUser.title || initialUser.displayName}</strong>
+            <small>{initialUser.title ? `${initialUser.displayName} · ${permissionSummary(initialUser.permissions)}` : `${providerLabel(initialUser.provider)} · ${permissionSummary(initialUser.permissions)}`}</small>
           </span>
           <button className="icon-button inverse" onClick={() => void logout()} title="退出登录" aria-label="退出登录"><LogOut size={16} /></button>
         </div>
@@ -1039,6 +1069,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             <span>相册</span><ChevronRight size={15} />
             <strong>{showRecycleBin ? "回收站" : activeFolder?.name || "全部影像"}</strong>
           </div>
+          <div className="top-identity" aria-label="当前用户称号">
+            <Crown size={16} />
+            <span>{initialUser.title || permissionSummary(initialUser.permissions)}</span>
+            <strong>{initialUser.displayName}</strong>
+          </div>
           <div className="top-actions">
             <label className="search-box">
               <Search size={17} />
@@ -1050,7 +1085,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 {copied ? "已复制" : "文件夹链接"}
               </button>
             )}
-            {selectedFolder && isAdmin && (
+            {selectedFolder && canManageFolders && (
               <button className="secondary-button" onClick={() => void copyUploadLink()}>
                 {copiedUpload ? <Check size={17} /> : <Share2 size={17} />}
                 {copiedUpload ? "已复制" : "上传链接"}
@@ -1079,7 +1114,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <span><strong>等待接入腾讯云存储</strong> 配置完成后即可在线上传与查看照片和视频。</span>
             </div>
           )}
-          {sharedUploadToken && sharedFolder === selectedFolder && !isAdmin && (
+          {sharedUploadToken && sharedFolder === selectedFolder && !canDirectUpload && (
             <div className="share-notice" role="status">
               <Share2 size={17} />
               <span>你可以向「{activeFolder?.name || "当前文件夹"}」上传照片或视频</span>
@@ -1108,7 +1143,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                     : `${total} 项影像`}</p>
             </div>
             <div className="section-controls">
-              {isAdmin && visiblePhotos.length > 0 && (
+              {canBatchEdit && visiblePhotos.length > 0 && (
                 <button className={`secondary-button edit-mode-button ${editMode ? "active" : ""}`} onClick={() => editMode ? leaveEditMode() : setEditMode(true)}>
                   {editMode ? <X size={16} /> : <Pencil size={16} />}
                   {editMode ? "退出编辑" : "编辑"}
@@ -1140,12 +1175,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 </div>
               ) : (
                 <div>
-                  <button className="secondary-button" disabled={!selectedPhotoIds.length || !moveTargets.length || batchSaving} onClick={openBatchMove}>
+                  {canEditMedia && <button className="secondary-button" disabled={!selectedPhotoIds.length || !moveTargets.length || batchSaving} onClick={openBatchMove}>
                     <FolderOpen size={16} /> 移动到
-                  </button>
-                  <button className="danger-button" disabled={!selectedPhotoIds.length || batchSaving} onClick={() => setBatchDeleteOpen(true)}>
+                  </button>}
+                  {canDeleteMedia && <button className="danger-button" disabled={!selectedPhotoIds.length || batchSaving} onClick={() => setBatchDeleteOpen(true)}>
                     <Trash2 size={16} /> 移入回收站
-                  </button>
+                  </button>}
                 </div>
               )}
             </div>
@@ -1195,12 +1230,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                       {showRecycleBin && photo.purgeAt && <span className="purge-date">{formatDate(photo.purgeAt)} 后永久删除</span>}
                     </div>
                     {!editMode && <div className="photo-actions">
-                      {isAdmin && !showRecycleBin && (
-                        <>
-                          <button className="icon-button" onClick={() => openRename(photo)} title="重命名" aria-label={`重命名 ${photo.name}`}><Pencil size={16} /></button>
-                          <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title={`删除${mediaLabel(photo)}`} aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>
-                        </>
-                      )}
+                      {canEditMedia && !showRecycleBin && <button className="icon-button" onClick={() => openRename(photo)} title="重命名" aria-label={`重命名 ${photo.name}`}><Pencil size={16} /></button>}
+                      {canDeleteMedia && !showRecycleBin && <button className="icon-button danger" onClick={() => setDeletingPhoto(photo)} title={`删除${mediaLabel(photo)}`} aria-label={`删除 ${photo.name}`}><Trash2 size={16} /></button>}
                       <a className="icon-button" href={downloadUrl(photo.url, photo.name)} onClick={() => logMediaAccess(photo, "media.download")} title="下载原文件" aria-label={`下载 ${photo.name}`}>
                         <Download size={17} />
                       </a>
@@ -1235,7 +1266,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               </div>
               <h2>{showRecycleBin ? "回收站是空的" : selectedFolder ? "这个文件夹还是空的" : "还没有影像"}</h2>
               <p>{showRecycleBin ? "删除的影像会在这里保留 7 天。" : selectedFolder ? "添加第一批照片或视频，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片与视频。"}</p>
-              {!showRecycleBin && (canUpload || isAdmin) && (
+              {!showRecycleBin && (canUpload || canManageFolders) && (
                 <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : openNewFolder()}>
                   {canUpload ? <Upload size={18} /> : <Plus size={18} />}
                   {canUpload ? "上传影像" : "新建文件夹"}
@@ -1271,8 +1302,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             )}
             <div className="admin-page-heading">
               <div>
-                <h1>相册管理</h1>
-                <p>{isSuperAdmin ? "成员身份、访问状态和审计记录仅对头儿可见。" : "在这里管理成员身份和访问状态。"}</p>
+                <h1>{isSuperAdmin ? "人员权限管理" : "成员称号管理"}</h1>
+                <p>{isSuperAdmin ? "阿里山清茶是超级管理员，可逐项设置其他成员权限、状态和称号。" : "你可以授予或修改成员称号，但看不到其他人的权限设置。"}</p>
               </div>
               <div className={`admin-tabs ${isSuperAdmin ? "" : "single"}`} role="tablist" aria-label="管理视图">
                 <button className={adminSection === "users" ? "active" : ""} onClick={() => switchAdminSection("users")} role="tab">
@@ -1289,36 +1320,49 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             {adminLoading ? (
               <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取管理数据</div>
             ) : adminSection === "users" ? (
-              <div className="management-table" role="table" aria-label="用户管理">
+              <div className={`management-table ${isSuperAdmin ? "permission-table" : "title-table"}`} role="table" aria-label={isSuperAdmin ? "人员权限管理" : "称号管理"}>
                 <div className="management-row management-header" role="row">
-                  <span>用户</span><span>登录来源</span><span>最后登录</span><span>角色</span><span>状态</span>
+                  <span>用户</span><span>称号</span>{isSuperAdmin && <><span>权限开关</span><span>账号状态</span></>}
                 </div>
                 {managedUsers.map((user) => (
                   <div className="management-row user-row" role="row" key={user.id}>
                     <div className="managed-user">
                       <span className="managed-avatar">{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : <UserRound size={18} />}</span>
-                      <span><strong>{user.displayName}</strong><small>{user.accountLabel}</small></span>
+                      <span><strong>{user.displayName}</strong><small>{user.accountLabel}{isSuperAdmin && user.provider && user.lastLoginAt ? ` · ${providerLabel(user.provider)} · ${formatFullDate(user.lastLoginAt)}` : ""}</small></span>
                     </div>
-                    <span className={`provider-tag ${user.provider}`}>{providerLabel(user.provider)}</span>
-                    <span className="table-date">{formatFullDate(user.lastLoginAt)}</span>
-                    <select
-                      value={user.role}
-                      disabled={user.id === initialUser.id}
-                      onChange={(event) => void updateManagedUser(user, { role: event.target.value as PublicAlbumUser["role"] })}
-                      aria-label={`${user.displayName}的角色`}
-                    >
-                      <option value="member">成员</option>
-                      <option value="admin">管理员</option>
-                    </select>
-                    <label className="status-toggle">
+                    {canAssignTitles ? (
+                      <input
+                        className="title-input"
+                        value={user.title || ""}
+                        maxLength={20}
+                        placeholder="设置称号"
+                        onChange={(event) => setManagedUsers((users) => users.map((item) => item.id === user.id ? { ...item, title: event.target.value } : item))}
+                        onBlur={(event) => void updateManagedUser(user, { title: event.currentTarget.value })}
+                        onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                        aria-label={`${user.displayName}的称号`}
+                      />
+                    ) : <span className="title-readonly">{user.title || "未设置"}</span>}
+                    {isSuperAdmin && <div className="permission-switches">
+                      {PERMISSION_OPTIONS.map((permission) => (
+                        <label key={permission.key}>
+                          <input
+                            type="checkbox"
+                            checked={user.accountLabel === "alishan-tea" || Boolean(user.permissions?.[permission.key])}
+                            disabled={user.accountLabel === "alishan-tea"}
+                            onChange={(event) => toggleManagedPermission(user, permission.key, event.target.checked)}
+                          />
+                          <span>{permission.label}</span>
+                        </label>
+                      ))}
+                    </div>}
+                    {isSuperAdmin && (user.accountLabel === "alishan-tea" ? <strong className="super-admin-badge">超级管理员</strong> : <label className="status-toggle">
                       <input
                         type="checkbox"
                         checked={user.status === "active"}
-                        disabled={user.id === initialUser.id}
                         onChange={(event) => void updateManagedUser(user, { status: event.target.checked ? "active" : "disabled" })}
                       />
                       <span>{user.status === "active" ? "已启用" : "已停用"}</span>
-                    </label>
+                    </label>)}
                   </div>
                 ))}
                 {!managedUsers.length && <div className="table-empty">还没有用户记录</div>}
@@ -1520,12 +1564,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <span>{formatSize(preview.size)}{preview.width ? ` · ${preview.width} × ${preview.height}` : ""}</span>
             </div>
             <div>
-              {isAdmin && !showRecycleBin && (
-                <>
-                  <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label={`重命名${mediaLabel(preview)}`}><Pencil size={17} /></button>
-                  <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title={`删除${mediaLabel(preview)}`} aria-label={`删除${mediaLabel(preview)}`}><Trash2 size={17} /></button>
-                </>
-              )}
+              {canEditMedia && !showRecycleBin && <button className="icon-button dark" onClick={() => openRename(preview)} title="重命名" aria-label={`重命名${mediaLabel(preview)}`}><Pencil size={17} /></button>}
+              {canDeleteMedia && !showRecycleBin && <button className="icon-button dark danger" onClick={() => setDeletingPhoto(preview)} title={`删除${mediaLabel(preview)}`} aria-label={`删除${mediaLabel(preview)}`}><Trash2 size={17} /></button>}
               <button className="icon-button dark" onClick={() => navigator.clipboard.writeText(preview.url)} title="复制文件链接" aria-label="复制文件链接"><Clipboard size={18} /></button>
               <a className="icon-button dark" href={downloadUrl(preview.url, preview.name)} onClick={() => logMediaAccess(preview, "media.download")} title="下载原文件" aria-label="下载原文件"><Download size={18} /></a>
               <button className="icon-button dark" onClick={() => setPreview(null)} title="关闭" aria-label="关闭预览"><X size={20} /></button>

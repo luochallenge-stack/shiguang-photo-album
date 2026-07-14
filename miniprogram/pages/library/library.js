@@ -7,6 +7,14 @@ const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const MAX_UPLOAD_COUNT = 50;
 const PICKER_BATCH_SIZE = 9;
 const MAX_BATCH_ACTION_COUNT = 100;
+const PERMISSION_OPTIONS = [
+  { key: "read", label: "访问" },
+  { key: "upload", label: "上传" },
+  { key: "edit", label: "编辑" },
+  { key: "delete", label: "删除" },
+  { key: "manageFolders", label: "文件夹" },
+  { key: "assignTitles", label: "赋予称号" },
+];
 let libraryRequestId = 0;
 let pendingUploadFiles = [];
 const generatingCoverIds = new Set();
@@ -40,9 +48,61 @@ function operationLabel(photo) {
 }
 
 function visibilityLabel(type) {
-  if (type === "admins") return "管理员";
+  if (type === "admins") return "管理者";
   if (type === "specific") return "指定用户";
   return "所有人";
+}
+
+function effectivePermissions(user) {
+  const current = user || {};
+  if (current.accountLabel === "alishan-tea") {
+    return { read: true, upload: true, edit: true, delete: true, manageFolders: true, assignTitles: true };
+  }
+  const roleDefaults = current.role === "admin"
+    ? { read: true, upload: true, edit: true, delete: true, manageFolders: true, assignTitles: false }
+    : current.role === "uploader"
+      ? { read: true, upload: true, edit: false, delete: false, manageFolders: false, assignTitles: false }
+      : { read: true, upload: false, edit: false, delete: false, manageFolders: false, assignTitles: false };
+  return { ...roleDefaults, ...(current.permissions || {}) };
+}
+
+function permissionLabel(permissions) {
+  if (permissions.manageFolders) return "文件夹管理者";
+  if (permissions.upload) return "可上传用户";
+  if (permissions.read) return "访问用户";
+  return "暂无访问权限";
+}
+
+function decorateUser(user) {
+  const current = user || {};
+  const permissions = effectivePermissions(current);
+  const superAdmin = current.accountLabel === "alishan-tea";
+  const defaultTitle = current.accountLabel === "alishan-tea" ? "伞兵指挥官" : "";
+  return {
+    ...current,
+    title: String(current.title || defaultTitle),
+    permissions,
+    permissionLabel: permissionLabel(permissions),
+    canUpload: permissions.upload,
+    canEdit: permissions.edit,
+    canDelete: permissions.delete,
+    canManageFolders: permissions.manageFolders,
+    canAssignTitles: permissions.assignTitles,
+    canManagePermissions: superAdmin,
+    canOpenPeople: superAdmin || permissions.assignTitles,
+  };
+}
+
+function decorateManagedUser(user) {
+  const decorated = decorateUser(user);
+  return {
+    ...decorated,
+    permissionItems: PERMISSION_OPTIONS.map((permission) => ({
+      ...permission,
+      enabled: Boolean(decorated.permissions[permission.key]),
+    })),
+    statusLabel: decorated.status === "active" ? "已启用" : "已停用",
+  };
 }
 
 function isVideoFile(file) {
@@ -143,6 +203,10 @@ Page({
     batchSaving: false,
     recycleMode: false,
     recycleCount: 0,
+    userManagementOpen: false,
+    managedUsers: [],
+    managedUsersLoading: false,
+    userSavingId: "",
   },
 
   onLoad(options) {
@@ -150,8 +214,20 @@ Page({
       wx.reLaunch({ url: "/pages/login/login" });
       return;
     }
-    this.setData({ user: api.currentUser() || {} });
-    this.loadLibrary(options.folder || "");
+    this.setData({ user: decorateUser(api.currentUser()) });
+    api.request("/api/auth/session")
+      .then(({ user }) => {
+        const current = decorateUser(user);
+        api.saveSession(api.getSessionToken(), current);
+        this.setData({ user: current });
+      })
+      .catch((error) => {
+        if (error.statusCode === 401) {
+          api.clearSession();
+          wx.reLaunch({ url: "/pages/login/login" });
+        }
+      })
+      .finally(() => this.loadLibrary(options.folder || ""));
   },
 
   onPullDownRefresh() {
@@ -221,7 +297,7 @@ Page({
           recycleMode,
           recycleCount: Number(payload.recycleCount) || 0,
         }, () => {
-          if (this.data.user.role === "admin" && !recycleMode) {
+          if (this.data.user.canUpload && !recycleMode) {
             this.generateMissingVideoCovers(nextPhotos);
           }
         });
@@ -271,7 +347,7 @@ Page({
   },
 
   chooseRecycleBin() {
-    if (this.data.user.role !== "admin") return;
+    if (!this.data.user.canDelete) return;
     this.setData({ folderMenuOpen: false });
     this.exitEditMode();
     this.loadLibrary("", false, false, true);
@@ -285,8 +361,69 @@ Page({
     this.setData({ folderMenuOpen: false });
   },
 
+  openUserManagement() {
+    if (!this.data.user.canOpenPeople) return;
+    this.setData({ folderMenuOpen: false, userManagementOpen: true, managedUsersLoading: true });
+    api.request("/api/admin/users")
+      .then(({ users }) => this.setData({ managedUsers: (users || []).map(decorateManagedUser) }))
+      .catch((error) => wx.showToast({ title: error.message || "读取人员失败", icon: "none" }))
+      .finally(() => this.setData({ managedUsersLoading: false }));
+  },
+
+  closeUserManagement() {
+    if (this.data.userSavingId) return;
+    this.setData({ userManagementOpen: false });
+  },
+
+  updateManagedTitle(event) {
+    const userId = event.currentTarget.dataset.id;
+    const title = event.detail.value;
+    this.setData({
+      managedUsers: this.data.managedUsers.map((user) => user.id === userId ? { ...user, title } : user),
+    });
+  },
+
+  saveManagedTitle(event) {
+    const target = this.data.managedUsers.find((user) => user.id === event.currentTarget.dataset.id);
+    if (target) this.updateManagedUser(target, { title: String(target.title || "").trim() });
+  },
+
+  toggleManagedPermission(event) {
+    if (!this.data.user.canManagePermissions) return;
+    const target = this.data.managedUsers.find((user) => user.id === event.currentTarget.dataset.id);
+    const key = event.currentTarget.dataset.key;
+    if (!target || !target.permissions || target.accountLabel === "alishan-tea" || !Object.prototype.hasOwnProperty.call(target.permissions, key)) return;
+    this.updateManagedUser(target, { permissions: { ...target.permissions, [key]: Boolean(event.detail.value) } });
+  },
+
+  toggleManagedStatus(event) {
+    const target = this.data.managedUsers.find((user) => user.id === event.currentTarget.dataset.id);
+    if (!this.data.user.canManagePermissions || !target || target.accountLabel === "alishan-tea") return;
+    this.updateManagedUser(target, { status: target.status === "active" ? "disabled" : "active" });
+  },
+
+  updateManagedUser(target, changes) {
+    if (!target || this.data.userSavingId) return;
+    this.setData({ userSavingId: target.id });
+    api.request("/api/admin/users", { method: "PATCH", data: { userId: target.id, ...changes } })
+      .then(({ user }) => {
+        const updated = decorateManagedUser(user);
+        this.setData({
+          managedUsers: this.data.managedUsers.map((item) => item.id === updated.id ? updated : item),
+        });
+        if (updated.id === this.data.user.id) {
+          const current = decorateUser({ ...updated, permissions: updated.permissions || this.data.user.permissions });
+          api.saveSession(api.getSessionToken(), current);
+          this.setData({ user: current });
+        }
+        wx.showToast({ title: "人员信息已更新", icon: "success" });
+      })
+      .catch((error) => wx.showToast({ title: error.message || "更新人员失败", icon: "none" }))
+      .finally(() => this.setData({ userSavingId: "" }));
+  },
+
   async moveFolderOrder(event) {
-    if (this.data.user.role !== "admin" || this.data.reorderingFolders) return;
+    if (!this.data.user.canManageFolders || this.data.reorderingFolders) return;
     const index = Number(event.currentTarget.dataset.index);
     const direction = Number(event.currentTarget.dataset.direction);
     const targetIndex = index + direction;
@@ -315,7 +452,7 @@ Page({
   },
 
   openCreateFolder() {
-    if (this.data.user.role !== "admin" || this.data.creatingFolder) return;
+    if (!this.data.user.canManageFolders || this.data.creatingFolder) return;
     this.exitEditMode();
     const userId = this.data.user.id || "";
     this.setData({
@@ -371,7 +508,7 @@ Page({
     if (!folder) return;
     const actions = [];
     const handlers = [];
-    if (this.data.user.role === "admin") {
+    if (this.data.user.canManageFolders) {
       actions.push("重命名");
       handlers.push(() => this.openRename("folder", folder));
     }
@@ -389,7 +526,7 @@ Page({
   },
 
   openRename(kind, target) {
-    if (this.data.user.role !== "admin" || !target) return;
+    if (!target || (kind === "folder" ? !this.data.user.canManageFolders : !this.data.user.canEdit)) return;
     this.setData({
       folderMenuOpen: false,
       renameOpen: true,
@@ -466,7 +603,7 @@ Page({
     const query = folderSlug ? `?folder=${encodeURIComponent(folderSlug)}` : "";
     return api.request(`/api/users/options${query}`)
       .then(({ users }) => {
-        this.setData({ visibilityUsers: users || [] }, () => this.syncVisibilityUsers());
+        this.setData({ visibilityUsers: (users || []).map(decorateManagedUser) }, () => this.syncVisibilityUsers());
         return users || [];
       })
       .catch((error) => {
@@ -590,14 +727,14 @@ Page({
   },
 
   openMediaActions(event) {
-    if (this.data.user.role !== "admin" || this.data.editMode) return;
+    if (!this.data.user.canEdit || this.data.editMode) return;
     const id = event.currentTarget.dataset.id;
     const item = this.data.photos.find((photo) => photo.id === id);
     if (item) this.openRename("media", item);
   },
 
   toggleEditMode() {
-    if (this.data.user.role !== "admin" || this.data.uploading || this.data.batchSaving) return;
+    if ((!this.data.user.canEdit && !this.data.user.canDelete) || this.data.uploading || this.data.batchSaving) return;
     if (this.data.editMode) {
       this.exitEditMode();
       return;
@@ -661,7 +798,7 @@ Page({
   },
 
   openBatchMove() {
-    if (this.data.recycleMode || !this.data.batchSelectedCount || this.data.batchSaving) return;
+    if (!this.data.user.canEdit || this.data.recycleMode || !this.data.batchSelectedCount || this.data.batchSaving) return;
     const moveFolders = this.data.selectedFolder
       ? this.data.folders.filter((folder) => folder.slug !== this.data.selectedFolder)
       : this.data.folders;
@@ -711,7 +848,7 @@ Page({
   },
 
   confirmBatchDelete() {
-    if (!this.data.batchSelectedCount || this.data.batchSaving) return;
+    if (!this.data.user.canDelete || !this.data.batchSelectedCount || this.data.batchSaving) return;
     wx.showModal({
       title: "移入回收站",
       content: `确定将已选择的 ${this.data.batchSelectedCount} 项影像移入回收站吗？影像会保留 7 天。`,
@@ -744,6 +881,7 @@ Page({
   },
 
   async restoreSelectedMedia() {
+    if (!this.data.user.canDelete) return;
     const ids = this.selectedBatchIds();
     if (!ids.length || this.data.batchSaving) return;
     this.setData({ batchSaving: true });
@@ -759,7 +897,7 @@ Page({
   },
 
   confirmPermanentDelete() {
-    if (!this.data.batchSelectedCount || this.data.batchSaving) return;
+    if (!this.data.user.canDelete || !this.data.batchSelectedCount || this.data.batchSaving) return;
     wx.showModal({
       title: "永久删除影像",
       content: `确定永久删除已选择的 ${this.data.batchSelectedCount} 项影像吗？云存储原文件也会被删除，无法恢复。`,
@@ -787,7 +925,7 @@ Page({
   },
 
   chooseMedia() {
-    if (this.data.user.role !== "admin") return;
+    if (!this.data.user.canUpload) return;
     if (!this.data.selectedFolder) {
       wx.showToast({ title: "请先选择目标文件夹", icon: "none" });
       return;

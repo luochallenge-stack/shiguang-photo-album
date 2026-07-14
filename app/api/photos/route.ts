@@ -7,7 +7,7 @@ import {
   renamePhotoRecord,
   uploadPhoto,
 } from "../../../lib/cloudbase";
-import { canUserReadFolder, canWriteFolder, unauthorized } from "../../../lib/access";
+import { canDeleteMedia, canEditMedia, canUserReadFolder, canWriteFolder, unauthorized } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canEditMedia(user)) return forbidden();
   try {
     const body = (await request.json()) as { id?: unknown; name?: unknown };
     const id = typeof body.id === "string" ? body.id.trim() : "";
@@ -129,7 +129,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canDeleteMedia(user)) return forbidden();
   try {
     const id = new URL(request.url).searchParams.get("id")?.trim() || "";
     if (!id) return Response.json({ error: "缺少文件标识" }, { status: 400 });

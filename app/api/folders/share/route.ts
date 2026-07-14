@@ -1,5 +1,5 @@
 import { findFolder, setUploadTokenRecord } from "../../../../lib/cloudbase";
-import { canUserReadFolder, hashUploadToken } from "../../../../lib/access";
+import { canManageFolders, canUserReadFolder, hashUploadToken } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
@@ -13,7 +13,7 @@ function createToken(): string {
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canManageFolders(user)) return forbidden();
   try {
     const payload = (await request.json()) as { folderSlug?: string };
     const folderSlug = payload.folderSlug?.trim() || "";

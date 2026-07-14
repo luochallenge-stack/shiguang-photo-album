@@ -61,7 +61,7 @@
 | `album_folders` | `AlbumFolder` | 文件夹名称、slug、创建者、可见范围、目录顺序和创建时间 |
 | `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、视频封面、所属文件夹、回收站时间和最近操作人 |
 | `album_upload_tokens` | `UploadTokenRecord` | 每个文件夹当前有效的上传链接令牌摘要 |
-| `album_users` | `AlbumUser` | 本地账号、角色、状态和密码摘要 |
+| `album_users` | `AlbumUser` | 本地账号、称号、兼容角色、独立权限、状态和密码摘要 |
 | `album_audit_logs` | `AlbumAuditLog` | 登录、浏览和修改操作日志 |
 
 关键字段约定：
@@ -70,6 +70,8 @@
 - `folder.creatorUserId` 是文件夹创建者。创建者可修改自己创建的文件夹可见范围。
 - `folder.visibilityType` 只能是 `all`、`admins` 或 `specific`。
 - `folder.visibleUserIds` 仅在 `visibilityType="specific"` 时生效，保存可见用户 ID。
+- `user.title` 是可选称号，最多 20 个字符；账号 `alishan-tea` 未写入称号时由服务端兼容返回默认值“伞兵指挥官”。
+- `user.permissions` 保存 `read/upload/edit/delete/manageFolders/assignTitles` 六项布尔权限。历史账号缺少该字段时由旧 `role` 映射默认值，首次修改后写入完整权限对象。
 - `folder.sortOrder` 是管理员保存的目录顺序；历史记录缺少该字段时按 `createdAt` 倒序回退。
 - `photo.fileId` 是生成临时访问地址、查询文件和删除文件的权威标识。
 - `photo.coverFileId` 是可选的视频封面文件标识；永久删除视频时必须与 `fileId` 一并删除。
@@ -86,14 +88,28 @@
 
 ### 4.1 用户身份
 
-用户角色只有：
+实际授权使用六项独立权限：
 
-- `member`：默认注册角色，可浏览“所有人可见”以及明确选中自己的文件夹。
-- `admin`：可浏览“所有人可见”“管理员可见”以及明确选中自己的文件夹，并执行创建、上传、重命名、批量移动、恢复、永久删除和用户授权。
+- `read`：浏览有权看到的文件夹和影像。
+- `upload`：向有权读取的文件夹上传照片或视频，并生成视频封面。
+- `edit`：重命名、批量移动影像。
+- `delete`：移入回收站、恢复和永久删除，并访问回收站。
+- `manageFolders`：创建、重命名、排序文件夹，设置可见范围和生成上传链接。
+- `assignTitles`：授予、修改或清除成员称号。
 
-`provider="admin"` 且 `role="admin"` 的 bootstrap 管理员是项目超级管理员，也就是产品中的“头儿”。超级管理员可读取所有文件夹、修改任何文件夹的可见范围，并查看完整审计日志。普通管理员即使知道文件夹 slug 或媒体 ID，也不能访问未向自己开放的内容。
+数据库仍保留 `member/uploader/admin` 三种旧 `role`，只用于历史账号缺少 `permissions` 时计算默认权限，不再作为接口的最终授权依据。新注册账号仍写入 `role="member"`，因此默认只有 `read`。
+
+稳定账号 `accountLabel="alishan-tea"` 的阿里山清茶是项目唯一超级管理员，也就是产品中的“头儿”。它不依赖数据库权限字段，始终拥有六项权限、读取所有文件夹、修改任意文件夹可见范围、管理人员权限并查看完整审计日志。`provider="admin"` 的应急账号不再等同于超级管理员。
 
 用户状态只有 `active` 和 `disabled`。`disabled` 用户即使持有未过期令牌也无法继续通过 `currentUser`。
+
+称号与人员权限规则：
+
+- 称号与其他权限相互独立，本身不会授予读取、上传或管理能力。
+- 只有阿里山清茶能读取和修改完整人员权限；其他用户即使拥有 `assignTitles`，接口也不会向其返回任何人的权限对象。
+- 获得 `assignTitles` 的用户可以进入独立称号管理并修改称号，但看不到“人员与权限”界面。
+- 称号授权必须经过 `PATCH /api/admin/users` 的服务端校验，不能只依赖客户端隐藏输入框。
+- 阿里山清茶不能被停用或修改权限，服务端始终返回全部权限。
 
 ### 4.2 Web 与小程序会话
 
@@ -119,7 +135,7 @@
 统一规则位于 `lib/access.ts`，API 不得自行复制一套不同判断。
 
 - `all`：任何已登录且状态正常的注册用户可见。
-- `admins`：普通管理员可见；成员不可见。
+- `admins`：仅 `manageFolders=true` 的管理者可见。字段名保留 `admins` 以兼容历史数据，界面文案统一显示“管理者可见”。
 - `specific`：只有 `visibleUserIds` 中的用户可见。
 - 文件夹创建者始终可见，且可修改自己创建的文件夹可见范围。
 - 项目超级管理员始终可见，且可修改任意文件夹可见范围。
@@ -132,7 +148,7 @@
 - 无权限文件夹不返回名称、数量或任何占位提示；直接请求其 slug 时统一返回“文件夹不存在”。
 - 媒体详情、临时 URL、下载、封面、重命名、移动、删除、恢复、审计事件和上传都必须调用 `canUserReadFolder` 或建立在 `canWriteFolder` 上。
 - 无权限媒体 ID 统一按“文件不存在”处理，不能通过状态码或错误文案确认资源存在。
-- 普通管理员的回收站只包含其可见文件夹；完整审计日志只允许超级管理员读取。
+- 拥有删除权限的用户，其回收站只包含自身可见文件夹；完整审计日志只允许超级管理员读取。
 - 新增搜索、通知、动态、最近上传、推荐或统计入口时，必须先应用同样过滤，不能只依赖前端隐藏。
 
 历史兼容：缺少 `visibilityType` 的旧公开文件夹按 `all` 处理；旧 `passwordHash` 非空的文件夹按 `admins` 处理。这样旧加密内容不会意外公开，也不再要求输入密码。首次修改可见范围后会写入 V2 字段并清空旧 `passwordHash`。历史文件夹没有可靠的创建者信息，因此默认只能由超级管理员修改可见范围。
@@ -170,7 +186,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 2. 用户可以连续选择多轮，确认后统一进入顺序上传队列并显示整体进度。
 3. 客户端提前拒绝超过 50 MB 的图片和超过 500 MB 的视频；大于 8 MB 的图片使用 `wx.compressImage`，视频不压缩。
 4. `wx.uploadFile` 以 multipart 请求调用 `POST /api/photos`。
-5. 服务端读取文件、校验管理员权限、上传云存储并写入数据库。
+5. 服务端读取文件、校验上传权限、上传云存储并写入数据库。
 6. 服务端使用 FFmpeg 自动抽取视频首帧并写入 `coverFileId`；若自动抽取失败，小程序再把 `wx.chooseMedia` 返回的 `thumbTempFilePath` 上传到 `POST /api/photos/cover`。
 7. 历史视频没有 `coverFileId` 时，管理员小程序会串行调用 `POST /api/photos/cover/generate` 补生成；同一时刻只处理一个视频，但会自动继续到当前页全部完成。
 
@@ -206,31 +222,33 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `POST /api/auth/admin` | 管理口令 | bootstrap 管理员登录 |
 | `GET/DELETE /api/auth/session` | 登录 | 读取会话或退出 |
 | `GET /api/library` | 登录 | 按文件夹分页返回可见媒体；双端支持 `limit/offset` |
-| `POST /api/folders` | admin | 创建文件夹并设置可见范围 |
-| `PATCH /api/folders` | 创建者/超级管理员 | 修改文件夹可见范围 |
-| `PATCH /api/folders/order` | admin | 保存当前用户可见目录顺序，不改变隐藏目录相对位置 |
-| `PATCH /api/folders/name` | admin | 重命名文件夹，保持 slug 不变 |
-| `POST /api/folders/share` | admin | 生成或轮换上传链接令牌 |
-| `GET /api/users/options` | admin/文件夹创建者 | 返回有效用户，供可见范围选择器使用 |
-| `POST /api/photos/upload` | admin/上传令牌 | 生成 Web 直传信息和票据 |
-| `PATCH /api/photos/upload` | admin/上传令牌 | 确认 Web 直传并登记媒体 |
-| `POST /api/photos` | admin/上传令牌 | multipart 上传，供小程序照片和视频使用 |
-| `POST /api/photos/cover` | admin | 为已上传视频保存首帧封面 |
-| `PATCH/DELETE /api/photos` | admin | 重命名单项媒体，或将其移入回收站 |
-| `PATCH/DELETE /api/photos/batch` | admin | 批量移动，或将最多 100 项影像移入回收站 |
-| `PATCH/DELETE /api/photos/recycle` | admin | 批量恢复，或立即永久删除回收站影像 |
+| `POST /api/folders` | manageFolders | 创建文件夹并设置可见范围 |
+| `PATCH /api/folders` | manageFolders 创建者/超级管理员 | 修改文件夹可见范围 |
+| `PATCH /api/folders/order` | manageFolders | 保存当前用户可见目录顺序，不改变隐藏目录相对位置 |
+| `PATCH /api/folders/name` | manageFolders | 重命名文件夹，保持 slug 不变 |
+| `POST /api/folders/share` | manageFolders | 生成或轮换上传链接令牌 |
+| `GET /api/users/options` | manageFolders/可管理可见范围 | 返回有效用户，供可见范围选择器使用 |
+| `POST /api/photos/upload` | upload/上传令牌 | 生成 Web 直传信息和票据 |
+| `PATCH /api/photos/upload` | upload/上传令牌 | 确认 Web 直传并登记媒体 |
+| `POST /api/photos` | upload/上传令牌 | multipart 上传，供小程序照片和视频使用 |
+| `POST /api/photos/cover` | upload | 为已上传视频保存首帧封面 |
+| `PATCH /api/photos` | edit | 重命名单项媒体 |
+| `DELETE /api/photos` | delete | 将单项媒体移入回收站 |
+| `PATCH /api/photos/batch` | edit | 批量移动最多 100 项影像 |
+| `DELETE /api/photos/batch` | delete | 将最多 100 项影像移入回收站 |
+| `PATCH/DELETE /api/photos/recycle` | delete | 批量恢复，或立即永久删除回收站影像 |
 | `GET /api/photos/url` | 文件夹可读 | 刷新图片或视频临时地址 |
 | `POST /api/audit` | 登录 | 记录客户端预览或下载事件 |
-| `GET/PATCH /api/admin/users` | admin | 用户列表、角色和状态管理 |
+| `GET/PATCH /api/admin/users` | 超级管理员/assignTitles | 超级管理员管理六项权限、状态和称号；称号管理者只读取基础用户信息并修改称号 |
 | `GET /api/admin/audit-logs` | 超级管理员 | 审计日志列表 |
-| `POST /api/admin/verify` | admin | 简单管理员身份检查 |
+| `POST /api/admin/verify` | manageFolders | 简单文件夹管理身份检查 |
 
 `DELETE /api/photos` 现在是软删除，不再立即删除云文件。Route Handler 的基本顺序应保持为：认证、角色或资源权限、输入校验、领域操作、审计、响应。不能只依赖界面隐藏按钮实现授权。
 
 ### 回收站与操作人
 
 - 普通删除只写入 `deletedAt`、`purgeAt` 和最近操作人，保留期固定为 7 天。
-- `/api/library?recycle=1` 仅管理员可用，双端回收站从这里读取内容。
+- `/api/library?recycle=1` 仅拥有 `delete` 权限的用户可用，双端回收站从这里读取内容。
 - 回收站支持批量恢复和立即永久删除；永久删除才调用 CloudBase `deleteFile` 并删除数据库记录。
 - 每次读取 `/api/library` 会调用 `purgeExpiredPhotos` 清理已经到期的影像；因此在线使用时会自动清理，服务完全无流量时会推迟到下一次访问。
 - 上传、重命名、移动、移入回收站和恢复都必须更新 `lastAction*` 字段；批量操作仍要逐张写审计记录。
@@ -263,9 +281,9 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 文件夹导航、全部影像、搜索、网格/列表视图。
 - Web 每页读取 48 项，通过“加载更多”追加；标题显示数据库返回的真实总数。
 - 新建文件夹、上传、拖放、进度和上传链接。
-- 新建文件夹时设置可见范围，创建者或超级管理员可后续调整。
+- 新建文件夹时设置可见范围，拥有 `manageFolders` 的创建者或超级管理员可后续调整。
 - 图片/视频在线播放、下载、重命名、编辑模式、批量移动和 7 天回收站。
-- 管理员用户授权；审计日志 Tab 仅超级管理员显示。
+- 超级管理员使用六项开关管理人员权限、状态和称号；称号管理者只看到称号列，审计日志 Tab 仅超级管理员显示。
 - 旧 CloudBase Run 域名到正式域名的客户端跳转。
 
 `album-client.tsx` 当前是大型单组件。新增较复杂功能时，优先按“媒体上传、文件夹安全、管理后台、预览器”拆出组件或 hooks，但不要在没有收益时做全量重构。
@@ -302,10 +320,11 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 图片使用缩略图和 lazy-load，失败时回退原图。
 - Logo 旁的三横按钮打开文件目录；管理员的新建入口固定在目录顶部，并可用上下箭头持久化调整文件夹顺序。
 - 文件夹“更多”操作支持重命名和修改可见范围；文件夹 slug 始终保持不变。
-- 管理员可从影像卡片右上角重命名单项照片或视频，保存后重新加载以刷新最近操作人。
+- 拥有 `edit` 权限的用户可从影像卡片右上角重命名单项照片或视频，保存后重新加载以刷新最近操作人。
 - 新上传视频使用微信选择器返回的首帧缩略图作为列表封面，没有封面的历史视频继续显示占位状态。
 - 目录和全部影像只渲染服务端返回的可见文件夹与媒体，不在客户端保留隐藏目录占位。
-- 普通成员只读；管理员可新建文件夹，选择具体文件夹后可创建最多 50 项照片/视频的上传任务。
+- 页面按六项权限分别显示上传、编辑、删除、回收站和目录管理入口。
+- “人员与权限”只对阿里山清茶显示；被授予 `assignTitles` 的用户只看到“称号管理”。
 - 管理员编辑模式单次最多选择 100 项，支持批量移动和移入回收站。
 - 管理员回收站支持批量恢复和永久删除；影像卡片显示最近操作者。
 - 不允许在“全部影像”直接上传，因为服务端需要明确目标 folderSlug。
@@ -399,7 +418,7 @@ https://7061-paratrooper-battalion-d1b3b82e83-1313194650.tcb.qcloud.la
 
 - 影像列表使用数据库 `skip/limit` 分页；大量数据或高并发写入场景可进一步升级为基于 `createdAt + id` 的游标分页。
 - Web 搜索目前只过滤已经加载到浏览器的页面，不是服务端全文搜索。
-- 小程序支持管理员新建、重命名、排序和设置文件夹可见范围，支持单项文件重命名、批量移动、回收站和带首帧封面的照片/视频上传；用户授权和完整日志查看仍在网页管理端完成。
+- 小程序支持人员称号和六项独立权限管理，并按权限开放新建/重命名/排序/设置文件夹可见范围、单项文件重命名、批量移动、回收站和带首帧封面的照片/视频上传；完整日志查看仍在网页管理端完成。
 - 小程序 multipart 上传经过应用服务器，不适合大文件。
 - 云存储写入/删除与数据库记录不是事务操作；中途失败可能产生孤立对象或孤立记录，批量导入前应设计补偿和对账。
 - `album-client.tsx` 体积较大，复杂迭代前可渐进拆分。

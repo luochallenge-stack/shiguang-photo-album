@@ -3,7 +3,9 @@ import {
   findUserByAccountLabel,
   saveUser,
   type AlbumUser,
+  type AlbumUserPermissions,
 } from "./cloudbase";
+import { effectiveUserPermissions } from "./access";
 
 const SESSION_COOKIE = "album-session";
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -17,8 +19,12 @@ type SessionPayload = {
 
 export type PublicAlbumUser = Pick<
   AlbumUser,
-  "id" | "provider" | "accountLabel" | "displayName" | "avatarUrl" | "role" | "status" | "createdAt" | "lastLoginAt"
->;
+  "id" | "provider" | "accountLabel" | "displayName" | "title" | "avatarUrl" | "role" | "status" | "createdAt" | "lastLoginAt"
+> & { permissions: AlbumUserPermissions };
+
+function defaultTitle(user: Pick<AlbumUser, "displayName" | "accountLabel">): string {
+  return user.accountLabel === "alishan-tea" ? "伞兵指挥官" : "";
+}
 
 function authSecret(): string {
   const secret = process.env.ALBUM_SESSION_SECRET || process.env.ALBUM_ADMIN_KEY || "";
@@ -91,13 +97,26 @@ export function publicUser(user: AlbumUser): PublicAlbumUser {
     provider,
     accountLabel,
     displayName,
+    title,
     avatarUrl,
     role,
     status,
     createdAt,
     lastLoginAt,
   } = user;
-  return { id, provider, accountLabel, displayName, avatarUrl, role, status, createdAt, lastLoginAt };
+  return {
+    id,
+    provider,
+    accountLabel,
+    displayName,
+    title: title?.trim() || defaultTitle(user),
+    avatarUrl,
+    role,
+    permissions: effectiveUserPermissions(user),
+    status,
+    createdAt,
+    lastLoginAt,
+  };
 }
 
 export async function createSessionToken(userId: string): Promise<string> {
@@ -200,6 +219,7 @@ export async function registerLocalUser(usernameInput: string, password: string,
     providerUserId: username,
     accountLabel: username,
     displayName,
+    title: defaultTitle({ displayName, accountLabel: username }),
     avatarUrl: "",
     passwordHash: await hashPassword(password),
     role: "member",
@@ -239,6 +259,7 @@ export async function createBootstrapAdmin(key: string): Promise<AlbumUser | nul
     providerUserId: "bootstrap-admin",
     accountLabel: "administrator",
     displayName: existing?.displayName || "相册管理员",
+    title: existing?.title || "",
     avatarUrl: "",
     passwordHash: existing?.passwordHash,
     role: "admin",

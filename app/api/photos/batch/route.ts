@@ -6,7 +6,7 @@ import {
   type AlbumPhoto,
   type AlbumUser,
 } from "../../../../lib/cloudbase";
-import { canUserReadFolder } from "../../../../lib/access";
+import { canDeleteMedia, canEditMedia, canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 
@@ -45,7 +45,7 @@ function validateIds(ids: string[]): Response | null {
 export async function PATCH(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canEditMedia(user)) return forbidden();
   try {
     const body = (await request.json()) as { ids?: unknown; targetFolderSlug?: unknown };
     const ids = photoIds(body.ids);
@@ -91,7 +91,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canDeleteMedia(user)) return forbidden();
   try {
     const body = (await request.json()) as { ids?: unknown };
     const ids = photoIds(body.ids);

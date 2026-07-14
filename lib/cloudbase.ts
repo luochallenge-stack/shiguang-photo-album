@@ -42,9 +42,17 @@ export type AlbumPhotoPage = {
   hasMore: boolean;
 };
 
-export type AlbumUserRole = "admin" | "member";
+export type AlbumUserRole = "admin" | "uploader" | "member";
 export type AlbumUserStatus = "active" | "disabled";
 export type AlbumUserProvider = "local" | "admin";
+export type AlbumUserPermissions = {
+  read: boolean;
+  upload: boolean;
+  edit: boolean;
+  delete: boolean;
+  manageFolders: boolean;
+  assignTitles: boolean;
+};
 
 export type AlbumUser = {
   id: string;
@@ -52,9 +60,11 @@ export type AlbumUser = {
   providerUserId: string;
   accountLabel: string;
   displayName: string;
+  title?: string;
   avatarUrl: string;
   passwordHash?: string;
   role: AlbumUserRole;
+  permissions?: Partial<AlbumUserPermissions>;
   status: AlbumUserStatus;
   createdAt: string;
   updatedAt: string;
@@ -343,7 +353,7 @@ export async function saveUser(user: AlbumUser): Promise<void> {
 
 export async function updateUserAccess(
   id: string,
-  changes: Partial<Pick<AlbumUser, "role" | "status" | "updatedAt">>,
+  changes: Partial<Pick<AlbumUser, "role" | "permissions" | "status" | "title" | "updatedAt">>,
 ): Promise<void> {
   await database().collection(COLLECTIONS.users).doc(id).update(changes);
 }

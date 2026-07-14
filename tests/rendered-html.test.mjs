@@ -22,7 +22,7 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(client, /伞兵训练营的时光集/);
   assert.match(client, /腾讯云 CloudBase/);
   assert.match(client, /api\/folders/);
-  assert.match(client, /用户与日志/);
+  assert.match(client, /权限与日志/);
   assert.match(client, /访问与操作日志/);
   assert.match(login, /创建账号/);
   assert.match(login, /注册并进入/);
@@ -37,7 +37,7 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(client, /移入回收站/);
   assert.match(client, /VisibilityFields/);
   assert.match(client, /所有人可见/);
-  assert.match(client, /管理员可见/);
+  assert.match(client, /管理者可见/);
   assert.match(client, /某些人可见/);
   assert.doesNotMatch(client, /文件夹密码|api\/folders\/unlock|folderLocked/);
   assert.match(accessControl, /folderVisibilityType/);
@@ -259,4 +259,50 @@ test("enforces identity-based folder visibility across backend entry points", as
   assert.match(client, /canManageVisibility/);
   assert.match(miniLibrary, /canManageVisibility/);
   assert.doesNotMatch(client + miniLibrary, /文件夹密码|解锁文件夹/);
+});
+
+test("supports titles and granular permissions on both clients", async () => {
+  const [cloudbase, auth, accessControl, usersRoute, photoRoute, batchRoute, folderRoute, client, miniLibrary, miniTemplate] = await Promise.all([
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/batch/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/folders/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+  ]);
+  assert.match(cloudbase, /AlbumUserPermissions/);
+  assert.match(cloudbase, /manageFolders: boolean/);
+  assert.match(cloudbase, /assignTitles: boolean/);
+  assert.match(cloudbase, /title\?: string/);
+  assert.match(auth, /accountLabel === "alishan-tea" \? "伞兵指挥官"/);
+  assert.match(auth, /effectiveUserPermissions/);
+  assert.match(accessControl, /accountLabel === "alishan-tea"/);
+  assert.match(accessControl, /effectiveUserPermissions/);
+  assert.match(accessControl, /canUploadMedia/);
+  assert.match(accessControl, /canEditMedia/);
+  assert.match(accessControl, /canDeleteMedia/);
+  assert.match(accessControl, /canManageFolders/);
+  assert.match(accessControl, /canAssignUserTitles/);
+  assert.match(usersRoute, /只有阿里山清茶可以管理人员权限/);
+  assert.match(usersRoute, /阿里山清茶是超级管理员，始终拥有全部权限/);
+  assert.match(usersRoute, /avatarUrl: result\.avatarUrl/);
+  assert.match(photoRoute, /canEditMedia/);
+  assert.match(photoRoute, /canDeleteMedia/);
+  assert.match(batchRoute, /canEditMedia/);
+  assert.match(batchRoute, /canDeleteMedia/);
+  assert.match(folderRoute, /canManageFolders/);
+  assert.match(client, /PERMISSION_OPTIONS/);
+  assert.match(client, /可上传用户/);
+  assert.match(client, /canAssignTitles/);
+  assert.match(client, /权限开关/);
+  assert.match(miniLibrary, /PERMISSION_OPTIONS/);
+  assert.match(miniLibrary, /canManagePermissions/);
+  assert.match(miniLibrary, /canAssignTitles/);
+  assert.match(miniTemplate, /人员与权限/);
+  assert.match(miniTemplate, /toggleManagedPermission/);
+  assert.match(miniTemplate, /member-title/);
 });

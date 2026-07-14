@@ -3,6 +3,7 @@ import {
   getUploadTokenRecord,
   type AlbumFolder,
   type AlbumUser,
+  type AlbumUserPermissions,
   type FolderVisibilityType,
 } from "./cloudbase";
 
@@ -73,7 +74,52 @@ export async function readMediaUploadTicket(ticket: string): Promise<MediaUpload
 }
 
 export function isSuperAdmin(user?: AlbumUser | null): boolean {
-  return user?.provider === "admin" && user.role === "admin";
+  return user?.accountLabel === "alishan-tea";
+}
+
+const ALL_PERMISSIONS: AlbumUserPermissions = {
+  read: true,
+  upload: true,
+  edit: true,
+  delete: true,
+  manageFolders: true,
+  assignTitles: true,
+};
+
+const ROLE_PERMISSIONS: Record<AlbumUser["role"], AlbumUserPermissions> = {
+  admin: { ...ALL_PERMISSIONS, assignTitles: false },
+  uploader: { ...ALL_PERMISSIONS, edit: false, delete: false, manageFolders: false, assignTitles: false },
+  member: { ...ALL_PERMISSIONS, upload: false, edit: false, delete: false, manageFolders: false, assignTitles: false },
+};
+
+export function effectiveUserPermissions(user?: AlbumUser | null): AlbumUserPermissions {
+  if (!user) return { ...ALL_PERMISSIONS, read: false, upload: false, edit: false, delete: false, manageFolders: false, assignTitles: false };
+  if (isSuperAdmin(user)) return { ...ALL_PERMISSIONS };
+  return { ...ROLE_PERMISSIONS[user.role], ...(user.permissions || {}) };
+}
+
+export function canReadAlbum(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).read;
+}
+
+export function canUploadMedia(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).upload;
+}
+
+export function canEditMedia(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).edit;
+}
+
+export function canDeleteMedia(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).delete;
+}
+
+export function canManageFolders(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).manageFolders;
+}
+
+export function canAssignUserTitles(user?: AlbumUser | null): boolean {
+  return effectiveUserPermissions(user).assignTitles;
 }
 
 export function folderVisibilityType(folder: AlbumFolder): FolderVisibilityType {
@@ -84,17 +130,17 @@ export function folderVisibilityType(folder: AlbumFolder): FolderVisibilityType 
 }
 
 export function canUserReadFolder(folder: AlbumFolder, user?: AlbumUser | null): boolean {
-  if (!user) return false;
+  if (!user || !canReadAlbum(user)) return false;
   if (isSuperAdmin(user)) return true;
   if (folder.creatorUserId === user.id) return true;
   const visibilityType = folderVisibilityType(folder);
   if (visibilityType === "all") return true;
-  if (visibilityType === "admins") return user.role === "admin";
+  if (visibilityType === "admins") return canManageFolders(user);
   return Array.isArray(folder.visibleUserIds) && folder.visibleUserIds.includes(user.id);
 }
 
 export function canManageFolderVisibility(folder: AlbumFolder, user?: AlbumUser | null): boolean {
-  return Boolean(user && (isSuperAdmin(user) || folder.creatorUserId === user.id));
+  return Boolean(user && (isSuperAdmin(user) || (canManageFolders(user) && folder.creatorUserId === user.id)));
 }
 
 export async function hashUploadToken(token: string): Promise<string> {
@@ -112,7 +158,7 @@ export async function canWriteFolder(
   if (!folderSlug || !user) return false;
   const folder = await findFolder(folderSlug);
   if (!folder || !canUserReadFolder(folder, user)) return false;
-  if (user.role === "admin") return true;
+  if (canUploadMedia(user)) return true;
   if (!uploadToken) return false;
   const tokenHash = await hashUploadToken(uploadToken);
   const match = await getUploadTokenRecord(folderSlug);
@@ -120,5 +166,5 @@ export async function canWriteFolder(
 }
 
 export function unauthorized() {
-  return Response.json({ error: "需要管理员权限或有效的文件夹上传链接" }, { status: 403 });
+  return Response.json({ error: "需要上传权限或有效的文件夹上传链接" }, { status: 403 });
 }

@@ -6,7 +6,7 @@ import {
   updatePhotoCoverFileId,
   uploadPhoto,
 } from "../../../../lib/cloudbase";
-import { canUserReadFolder } from "../../../../lib/access";
+import { canUploadMedia, canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../../lib/media";
@@ -14,7 +14,7 @@ import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../../lib/medi
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canUploadMedia(user)) return forbidden();
   try {
     const form = await request.formData();
     const file = form.get("file");

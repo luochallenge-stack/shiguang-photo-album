@@ -9,7 +9,8 @@
       <image class="logo" src="/images/logo.png" mode="aspectFill" />
       <view class="identity-copy">
         <text class="album-name">伞兵训练营的时光集</text>
-        <text class="member-name">{{user.displayName || user.accountLabel}} · {{user.role === 'admin' ? '管理员' : '成员'}}</text>
+        <text class="member-title">{{user.title || user.permissionLabel}}</text>
+        <text class="member-name">{{user.displayName || user.accountLabel}} · {{user.permissionLabel}}</text>
       </view>
     </view>
     <button class="logout-button" bindtap="logout">退出</button>
@@ -24,7 +25,8 @@
         </view>
         <button class="folder-menu-close" bindtap="closeFolderMenu" aria-label="关闭文件目录">×</button>
       </view>
-      <button wx:if="{{user.role === 'admin'}}" class="create-folder-menu-button" bindtap="openCreateFolder" disabled="{{creatingFolder}}">＋ 新建文件夹</button>
+      <button wx:if="{{user.canManageFolders}}" class="create-folder-menu-button" bindtap="openCreateFolder" disabled="{{creatingFolder}}">＋ 新建文件夹</button>
+      <button wx:if="{{user.canOpenPeople}}" class="manage-users-menu-button" bindtap="openUserManagement">{{user.canManagePermissions ? '人员与权限' : '称号管理'}}</button>
       <scroll-view class="folder-menu-list" scroll-y enhanced show-scrollbar="{{false}}">
         <view class="folder-menu-row">
           <button class="folder-menu-main {{selectedFolder === '' && !recycleMode ? 'active' : ''}}" data-slug="" bindtap="chooseFolder">
@@ -37,13 +39,13 @@
             <text class="visibility-mark {{item.visibilityType}}">{{item.visibilityLabel}}</text>
             <text class="folder-count">{{item.photoCount}}</text>
           </button>
-          <view wx:if="{{user.role === 'admin' || item.canManageVisibility}}" class="folder-order-actions">
-            <button wx:if="{{user.role === 'admin' || item.canManageVisibility}}" class="folder-manage-button" data-slug="{{item.slug}}" bindtap="openFolderActions" aria-label="管理文件夹">···</button>
-            <button wx:if="{{user.role === 'admin'}}" data-index="{{index}}" data-direction="-1" bindtap="moveFolderOrder" disabled="{{index === 0 || reorderingFolders}}" aria-label="上移文件夹">↑</button>
-            <button wx:if="{{user.role === 'admin'}}" data-index="{{index}}" data-direction="1" bindtap="moveFolderOrder" disabled="{{index === folders.length - 1 || reorderingFolders}}" aria-label="下移文件夹">↓</button>
+          <view wx:if="{{user.canManageFolders || item.canManageVisibility}}" class="folder-order-actions">
+            <button class="folder-manage-button" data-slug="{{item.slug}}" bindtap="openFolderActions" aria-label="管理文件夹">···</button>
+            <button wx:if="{{user.canManageFolders}}" data-index="{{index}}" data-direction="-1" bindtap="moveFolderOrder" disabled="{{index === 0 || reorderingFolders}}" aria-label="上移文件夹">↑</button>
+            <button wx:if="{{user.canManageFolders}}" data-index="{{index}}" data-direction="1" bindtap="moveFolderOrder" disabled="{{index === folders.length - 1 || reorderingFolders}}" aria-label="下移文件夹">↓</button>
           </view>
         </view>
-        <view wx:if="{{user.role === 'admin'}}" class="folder-menu-row recycle-menu-row">
+        <view wx:if="{{user.canDelete}}" class="folder-menu-row recycle-menu-row">
           <button class="folder-menu-main {{recycleMode ? 'active' : ''}}" bindtap="chooseRecycleBin">
             <text>回收站</text><text class="folder-count">{{recycleCount}}</text>
           </button>
@@ -57,9 +59,9 @@
       <text class="folder-title">{{selectedFolderName}}</text>
       <text class="photo-count">{{total}} 项影像</text>
     </view>
-    <view wx:if="{{user.role === 'admin'}}" class="heading-actions">
-      <button class="edit-button {{editMode ? 'active' : ''}}" bindtap="toggleEditMode" disabled="{{uploading || batchSaving || photos.length === 0}}">{{editMode ? '完成' : '编辑'}}</button>
-      <button wx:if="{{!editMode && !recycleMode}}" class="upload-button" bindtap="chooseMedia" disabled="{{uploading}}">＋ 上传</button>
+    <view wx:if="{{user.canUpload || user.canEdit || user.canDelete}}" class="heading-actions">
+      <button wx:if="{{user.canEdit || user.canDelete}}" class="edit-button {{editMode ? 'active' : ''}}" bindtap="toggleEditMode" disabled="{{uploading || batchSaving || photos.length === 0}}">{{editMode ? '完成' : '编辑'}}</button>
+      <button wx:if="{{user.canUpload && !editMode && !recycleMode}}" class="upload-button" bindtap="chooseMedia" disabled="{{uploading}}">＋ 上传</button>
     </view>
   </view>
 
@@ -78,7 +80,7 @@
   </view>
   <view class="empty-state" wx:elif="{{photos.length === 0}}">
     <text class="empty-title">{{recycleMode ? '回收站是空的' : '这里还没有影像'}}</text>
-    <text class="empty-copy">{{recycleMode ? '删除的影像会在这里保留 7 天。' : user.role === 'admin' ? '点击上传，添加第一张照片或视频。' : '管理员上传后，这里就会出现新的影像。'}}</text>
+    <text class="empty-copy">{{recycleMode ? '删除的影像会在这里保留 7 天。' : user.canUpload ? '点击上传，添加第一张照片或视频。' : '可上传用户添加后，这里就会出现新的影像。'}}</text>
   </view>
   <view class="media-grid" wx:else>
     <view class="media-item {{item.selected ? 'selected' : ''}}" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
@@ -88,7 +90,7 @@
         <view wx:if="{{item.video}}" class="video-play-overlay">
           <view class="play-button"><view class="play-triangle" /></view>
         </view>
-        <button wx:if="{{user.role === 'admin' && !editMode}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="重命名文件">···</button>
+        <button wx:if="{{user.canEdit && !editMode}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="重命名文件">···</button>
         <view wx:if="{{editMode}}" class="media-select {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</view>
       </view>
       <view class="media-copy">
@@ -112,8 +114,8 @@
       <button class="batch-delete" bindtap="confirmPermanentDelete" disabled="{{!batchSelectedCount || batchSaving}}">永久删除</button>
     </view>
     <view class="batch-actions" wx:else>
-      <button class="batch-move" bindtap="openBatchMove" disabled="{{!batchSelectedCount || batchSaving}}">移动到</button>
-      <button class="batch-delete" bindtap="confirmBatchDelete" disabled="{{!batchSelectedCount || batchSaving}}">移入回收站</button>
+      <button wx:if="{{user.canEdit}}" class="batch-move" bindtap="openBatchMove" disabled="{{!batchSelectedCount || batchSaving}}">移动到</button>
+      <button wx:if="{{user.canDelete}}" class="batch-delete" bindtap="confirmBatchDelete" disabled="{{!batchSelectedCount || batchSaving}}">移入回收站</button>
     </view>
   </view>
 
@@ -144,14 +146,14 @@
       <text class="dialog-copy">没有权限的人不会在目录、全部影像或搜索结果中看到这个文件夹。</text>
       <view class="visibility-options">
         <button class="visibility-option {{folderVisibility === 'all' ? 'active' : ''}}" data-type="all" bindtap="setFolderVisibility"><text>所有人可见</text><text>任何注册用户</text></button>
-        <button class="visibility-option {{folderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setFolderVisibility"><text>管理员可见</text><text>仅管理员</text></button>
+        <button class="visibility-option {{folderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setFolderVisibility"><text>管理者可见</text><text>仅文件夹管理者</text></button>
         <button class="visibility-option {{folderVisibility === 'specific' ? 'active' : ''}}" data-type="specific" bindtap="setFolderVisibility"><text>某些人可见</text><text>仅勾选用户</text></button>
       </view>
       <checkbox-group wx:if="{{folderVisibility === 'specific'}}" class="visibility-users" bindchange="updateFolderVisibleUsers">
         <label wx:for="{{visibilityUsers}}" wx:for-item="visibilityUser" wx:key="id">
           <checkbox value="{{visibilityUser.id}}" checked="{{visibilityUser.folderSelected}}" disabled="{{visibilityUser.id === managedFolder.creatorUserId}}" />
           <view><text>{{visibilityUser.displayName}}</text><text>{{visibilityUser.accountLabel}}</text></view>
-          <text>{{visibilityUser.role === 'admin' ? '管理员' : '成员'}}</text>
+          <text>{{visibilityUser.permissionLabel}}</text>
         </label>
       </checkbox-group>
       <view class="dialog-actions">
@@ -178,19 +180,54 @@
       />
       <view class="visibility-options">
         <button class="visibility-option {{newFolderVisibility === 'all' ? 'active' : ''}}" data-type="all" bindtap="setNewFolderVisibility"><text>所有人可见</text><text>任何注册用户</text></button>
-        <button class="visibility-option {{newFolderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setNewFolderVisibility"><text>管理员可见</text><text>仅管理员</text></button>
+        <button class="visibility-option {{newFolderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setNewFolderVisibility"><text>管理者可见</text><text>仅文件夹管理者</text></button>
         <button class="visibility-option {{newFolderVisibility === 'specific' ? 'active' : ''}}" data-type="specific" bindtap="setNewFolderVisibility"><text>某些人可见</text><text>仅勾选用户</text></button>
       </view>
       <checkbox-group wx:if="{{newFolderVisibility === 'specific'}}" class="visibility-users" bindchange="updateNewVisibleUsers">
         <label wx:for="{{visibilityUsers}}" wx:for-item="visibilityUser" wx:key="id">
           <checkbox value="{{visibilityUser.id}}" checked="{{visibilityUser.newSelected}}" disabled="{{visibilityUser.id === user.id}}" />
           <view><text>{{visibilityUser.displayName}}</text><text>{{visibilityUser.accountLabel}}</text></view>
-          <text>{{visibilityUser.role === 'admin' ? '管理员' : '成员'}}</text>
+          <text>{{visibilityUser.permissionLabel}}</text>
         </label>
       </checkbox-group>
       <view class="dialog-actions">
         <button class="cancel-button" bindtap="closeCreateFolder" disabled="{{creatingFolder}}">取消</button>
         <button class="dialog-primary-button" bindtap="createFolder" disabled="{{creatingFolder || !newFolderName || (newFolderVisibility === 'specific' && !newFolderVisibleUserIds.length)}}" loading="{{creatingFolder}}">创建</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="selection-backdrop" wx:if="{{userManagementOpen}}" bindtap="closeUserManagement">
+    <view class="selection-dialog people-dialog" catchtap="noop">
+      <text class="dialog-eyebrow">训练营成员</text>
+      <text class="dialog-title">{{user.canManagePermissions ? '人员与权限' : '称号管理'}}</text>
+      <text class="dialog-copy">{{user.canManagePermissions ? '阿里山清茶是超级管理员。可以分别设置访问、上传、编辑、删除、文件夹和赋予称号权限。' : '你可以授予或修改成员称号，但看不到成员权限设置。'}}</text>
+      <view class="people-loading" wx:if="{{managedUsersLoading}}">正在读取人员信息</view>
+      <scroll-view wx:else class="people-list" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="people-row" wx:for="{{managedUsers}}" wx:key="id">
+          <view class="people-heading">
+            <view><text class="people-name">{{item.displayName}}</text><text class="people-account">{{item.accountLabel}}</text></view>
+            <text wx:if="{{user.canManagePermissions}}" class="people-status {{item.status}}">{{item.statusLabel}}</text>
+          </view>
+          <view class="people-title-edit">
+            <input value="{{item.title}}" data-id="{{item.id}}" bindinput="updateManagedTitle" maxlength="20" placeholder="设置称号" />
+            <button data-id="{{item.id}}" bindtap="saveManagedTitle" loading="{{userSavingId === item.id}}">保存</button>
+          </view>
+          <view wx:if="{{user.canManagePermissions}}" class="people-permission-grid">
+            <label wx:for="{{item.permissionItems}}" wx:for-item="permission" wx:key="key">
+              <switch checked="{{permission.enabled}}" data-id="{{item.id}}" data-key="{{permission.key}}" bindchange="toggleManagedPermission" disabled="{{item.accountLabel === 'alishan-tea' || userSavingId !== ''}}" color="#21483f" />
+              <text>{{permission.label}}</text>
+            </label>
+          </view>
+          <view wx:if="{{user.canManagePermissions}}" class="people-access-edit">
+            <text wx:if="{{item.accountLabel === 'alishan-tea'}}" class="people-super-admin">超级管理员 · 全部权限</text>
+            <button wx:else data-id="{{item.id}}" bindtap="toggleManagedStatus" disabled="{{userSavingId !== ''}}">{{item.status === 'active' ? '停用账号' : '启用账号'}}</button>
+          </view>
+        </view>
+        <view class="people-empty" wx:if="{{!managedUsers.length}}">还没有人员记录</view>
+      </scroll-view>
+      <view class="dialog-actions">
+        <button class="dialog-primary-button people-close" bindtap="closeUserManagement" disabled="{{userSavingId !== ''}}">完成</button>
       </view>
     </view>
   </view>

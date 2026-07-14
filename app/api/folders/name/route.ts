@@ -1,5 +1,5 @@
 import { findFolder, updateFolderName } from "../../../../lib/cloudbase";
-import { canUserReadFolder } from "../../../../lib/access";
+import { canManageFolders, canUserReadFolder } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 import { normalizeFolderName } from "../../../../lib/validation";
@@ -7,7 +7,7 @@ import { normalizeFolderName } from "../../../../lib/validation";
 export async function PATCH(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canManageFolders(user)) return forbidden();
   try {
     const body = (await request.json()) as { folderSlug?: unknown; name?: unknown };
     const folderSlug = typeof body.folderSlug === "string" ? body.folderSlug.trim() : "";

@@ -1,4 +1,4 @@
-import { canUserReadFolder } from "../../../../lib/access";
+import { canDeleteMedia, canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { findFolder, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     if (!folder || !canUserReadFolder(folder, user)) {
       return Response.json({ error: "文件不存在" }, { status: 404 });
     }
-    if (photo.deletedAt && user.role !== "admin") return forbidden();
+    if (photo.deletedAt && !canDeleteMedia(user)) return forbidden();
 
     const video = isVideoMimeType(photo.mimeType);
     const [url] = await resolvePhotoUrls([photo.fileId], video ? 2 * 60 * 60 : 10 * 60);

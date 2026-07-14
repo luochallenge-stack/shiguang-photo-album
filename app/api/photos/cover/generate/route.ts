@@ -6,7 +6,7 @@ import {
   updatePhotoCoverFileId,
   uploadPhoto,
 } from "../../../../../lib/cloudbase";
-import { canUserReadFolder } from "../../../../../lib/access";
+import { canUploadMedia, canUserReadFolder } from "../../../../../lib/access";
 import { recordAudit } from "../../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../../lib/auth";
 import { isVideoMimeType } from "../../../../../lib/media";
@@ -17,7 +17,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  if (user.role !== "admin") return forbidden();
+  if (!canUploadMedia(user)) return forbidden();
   try {
     const body = (await request.json()) as { photoId?: unknown };
     const photoId = typeof body.photoId === "string" ? body.photoId.trim() : "";
