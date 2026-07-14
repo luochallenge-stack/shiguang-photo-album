@@ -1,8 +1,12 @@
 import {
   createObjectKey,
   createPhotoRecord,
+  DOCUMENT_FOLDER_SLUG,
+  ensureDocumentFolder,
+  findActivePhotoByContentHash,
   findFolder,
   findPhoto,
+  listFolders,
   recyclePhotoRecord,
   renamePhotoRecord,
   uploadPhoto,
@@ -10,10 +14,22 @@ import {
 import { canDeleteMedia, canEditMedia, canUserReadFolder, canWriteFolder, unauthorized } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
-import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
+import { isDocumentMimeType, isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
 import { extractVideoCover } from "../../../lib/video-cover";
+import { sha256Hex } from "../../../lib/content-hash";
 
 const RECYCLE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function visibleFolderSlugsFor(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>) {
+  const folders = await listFolders();
+  return folders.filter((folder) => canUserReadFolder(folder, user)).map((folder) => folder.slug);
+}
+
+function mediaResourceType(mimeType: string): "image" | "video" | "document" {
+  if (isVideoMimeType(mimeType)) return "video";
+  if (isDocumentMimeType(mimeType)) return "document";
+  return "image";
+}
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
@@ -21,13 +37,17 @@ export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const file = form.get("file");
-    const folderSlug = String(form.get("folderSlug") || "").trim();
+    let folderSlug = String(form.get("folderSlug") || "").trim();
     const uploadToken = String(form.get("uploadToken") || "");
     const requestedName = String(form.get("name") || "").trim().slice(0, 180);
     const name = requestedName || (file instanceof File ? file.name.slice(0, 180) : "");
     const media = file instanceof File ? mediaInfo(name, file.type) : null;
     if (!(file instanceof File) || !folderSlug || !media) {
-      return Response.json({ error: "图片或视频信息无效" }, { status: 400 });
+      return Response.json({ error: "图片、视频或文档信息无效" }, { status: 400 });
+    }
+    if (media.kind === "document") {
+      folderSlug = DOCUMENT_FOLDER_SLUG;
+      await ensureDocumentFolder(user.id);
     }
     const sizeError = mediaSizeError(media.kind, file.size);
     if (sizeError) return Response.json({ error: sizeError }, { status: 413 });
@@ -40,6 +60,20 @@ export async function POST(request: Request) {
 
     const objectKey = createObjectKey(folderSlug, name);
     const contents = Buffer.from(await file.arrayBuffer());
+    const contentHash = media.kind === "image" ? await sha256Hex(contents) : "";
+    const duplicate = contentHash
+      ? await findActivePhotoByContentHash(contentHash, await visibleFolderSlugsFor(user))
+      : null;
+    if (duplicate) {
+      await recordAudit(request, user, {
+        action: "media.dedupe.skip",
+        resourceType: "image",
+        resourceId: duplicate.id,
+        resourceName: duplicate.name,
+        metadata: { folderSlug: duplicate.folderSlug, targetFolderSlug: folderSlug, size: file.size },
+      });
+      return Response.json({ duplicate: true, photo: duplicate });
+    }
     const uploaded = await uploadPhoto(objectKey, contents);
     const createdAt = new Date().toISOString();
     const id = crypto.randomUUID();
@@ -65,6 +99,7 @@ export async function POST(request: Request) {
       width: Number(form.get("width")) || null,
       height: Number(form.get("height")) || null,
       ...(coverFileId ? { coverFileId } : {}),
+      ...(contentHash ? { contentHash } : {}),
       createdAt,
       deletedAt: "",
       purgeAt: "",
@@ -82,7 +117,7 @@ export async function POST(request: Request) {
     });
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "保存图片或视频信息失败";
+    const message = error instanceof Error ? error.message : "保存文件信息失败";
     return Response.json({ error: message }, { status: 500 });
   }
 }
@@ -108,7 +143,7 @@ export async function PATCH(request: Request) {
     await renamePhotoRecord(id, name, user.displayName);
     await recordAudit(request, user, {
       action: "media.rename",
-      resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
+      resourceType: mediaResourceType(photo.mimeType),
       resourceId: photo.id,
       resourceName: name,
       metadata: { previousName: photo.name, folderSlug: photo.folderSlug },
@@ -146,7 +181,7 @@ export async function DELETE(request: Request) {
     await recyclePhotoRecord(id, deletedAt, purgeAt, user.displayName);
     await recordAudit(request, user, {
       action: "media.recycle",
-      resourceType: isVideoMimeType(photo.mimeType) ? "video" : "image",
+      resourceType: mediaResourceType(photo.mimeType),
       resourceId: photo.id,
       resourceName: photo.name,
       metadata: { folderSlug: photo.folderSlug, size: photo.size, purgeAt },

@@ -2,6 +2,8 @@
 
 import {
   Activity,
+  ArrowLeft,
+  ArrowRight,
   Check,
   ChevronRight,
   Clipboard,
@@ -9,6 +11,7 @@ import {
   Download,
   Folder,
   FolderOpen,
+  FileText,
   Grid2X2,
   HardDrive,
   Image as ImageIcon,
@@ -33,12 +36,13 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import NextImage from "next/image";
-import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
+import { isDocumentMimeType, isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
 import type { PublicAlbumUser } from "@/lib/auth";
 import type { AlbumAuditLog, AlbumUserPermissions, FolderVisibilityType } from "@/lib/cloudbase";
 
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
+const DOCUMENT_FOLDER_SLUG = "documents";
 const MAX_BATCH_SELECTION = 100;
 const WEB_PAGE_SIZE = 48;
 
@@ -92,9 +96,23 @@ type LibraryResponse = {
   recycleBin: boolean;
 };
 
-type AdminSection = "users" | "logs";
+type AdminSection = "users" | "duplicates" | "logs";
 type ManagedAlbumUser = Pick<PublicAlbumUser, "id" | "accountLabel" | "displayName" | "title" | "avatarUrl">
   & Partial<Pick<PublicAlbumUser, "provider" | "role" | "permissions" | "status" | "createdAt" | "lastLoginAt">>;
+
+type DuplicatePhoto = Pick<PhotoItem, "id" | "folderSlug" | "name" | "size" | "createdAt"> & {
+  folderName: string;
+  contentHash?: string;
+};
+
+type DuplicateGroup = {
+  contentHash: string;
+  keepPhotoId: string;
+  duplicateIds: string[];
+  duplicateCount: number;
+  reclaimableBytes: number;
+  photos: DuplicatePhoto[];
+};
 
 const PERMISSION_OPTIONS: Array<{ key: keyof AlbumUserPermissions; label: string }> = [
   { key: "read", label: "访问" },
@@ -158,6 +176,12 @@ const ACTION_LABELS: Record<string, string> = {
   "media.download": "下载影像",
   "media.share": "转发影像",
   "media.share.link.create": "生成24小时分享链接",
+  "image.preview": "打开图片",
+  "video.play": "播放视频",
+  "document.open": "打开文档",
+  "media.dedupe.skip": "跳过重复图片",
+  "media.dedupe.scan": "扫描重复图片",
+  "media.dedupe.recycle": "回收重复图片",
   "media.recycle.folder": "删除文件夹并回收影像",
   "media.upload": "上传影像",
   "media.rename": "重命名影像",
@@ -324,17 +348,30 @@ function fileMimeType(file: File): string {
     webm: "video/webm",
     mpeg: "video/mpeg",
     mpg: "video/mpeg",
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   };
   return byExtension[extension || ""] || "application/octet-stream";
 }
 
 type DirectUploadResponse = {
-  upload: {
+  duplicate?: boolean;
+  photo?: PhotoItem;
+  upload?: {
     url: string;
     headers: Record<string, string>;
     ticket: string;
   };
 };
+
+type UploadResult = { duplicate: boolean };
+
+async function fileContentHash(file: File): Promise<string> {
+  if (!fileMimeType(file).startsWith("image/") || !crypto.subtle) return "";
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function uploadToCloudBase(
   folderSlug: string,
@@ -342,7 +379,8 @@ async function uploadToCloudBase(
   file: File,
   dimensions: { width: number | null; height: number | null },
   onProgress: (progress: number) => void,
-): Promise<void> {
+): Promise<UploadResult> {
+  const contentHash = await fileContentHash(file);
   const authHeaders = {
     "content-type": "application/json",
   };
@@ -358,14 +396,21 @@ async function uploadToCloudBase(
         mimeType: fileMimeType(file),
         width: dimensions.width,
         height: dimensions.height,
+        contentHash,
       }),
     }),
   );
+  if (prepared.duplicate) {
+    onProgress(100);
+    return { duplicate: true };
+  }
+  if (!prepared.upload) throw new Error("服务器没有返回上传凭证");
+  const upload = prepared.upload;
   onProgress(3);
   await new Promise<void>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("PUT", prepared.upload.url);
-    for (const [name, value] of Object.entries(prepared.upload.headers)) request.setRequestHeader(name, value);
+    request.open("PUT", upload.url);
+    for (const [name, value] of Object.entries(upload.headers)) request.setRequestHeader(name, value);
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(3 + Math.round((event.loaded / event.total) * 92));
     };
@@ -377,16 +422,18 @@ async function uploadToCloudBase(
     request.send(file);
   });
   onProgress(96);
-  await readJson<{ photo: PhotoItem }>(
+  const confirmed = await readJson<{ photo?: PhotoItem; duplicate?: boolean }>(
     await fetch("/api/photos/upload", {
       method: "PATCH",
       headers: authHeaders,
-      body: JSON.stringify({ ticket: prepared.upload.ticket, uploadToken }),
+      body: JSON.stringify({ ticket: upload.ticket, uploadToken }),
     }),
   );
+  return { duplicate: Boolean(confirmed.duplicate) };
 }
 
-function mediaLabel(photo: PhotoItem): "照片" | "视频" {
+function mediaLabel(photo: PhotoItem): "照片" | "视频" | "文档" {
+  if (isDocumentMimeType(photo.mimeType)) return "文档";
   return isVideoMimeType(photo.mimeType) ? "视频" : "照片";
 }
 
@@ -431,6 +478,10 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [adminSection, setAdminSection] = useState<AdminSection>("users");
   const [managedUsers, setManagedUsers] = useState<ManagedAlbumUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AlbumAuditLog[]>([]);
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [dedupeScannedCount, setDedupeScannedCount] = useState(0);
+  const [dedupeHashedCount, setDedupeHashedCount] = useState(0);
+  const [dedupeSaving, setDedupeSaving] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [sharedFolder, setSharedFolder] = useState("");
   const [sharedUploadToken, setSharedUploadToken] = useState("");
@@ -456,6 +507,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [folderVisibleUserIds, setFolderVisibleUserIds] = useState<string[]>([]);
   const [savingVisibility, setSavingVisibility] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const documentInput = useRef<HTMLInputElement>(null);
   const libraryRequestId = useRef(0);
   const isSuperAdmin = initialUser.accountLabel === "alishan-tea";
   const canDirectUpload = initialUser.permissions.upload;
@@ -535,7 +587,14 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     return photos.filter((photo) => photo.name.toLocaleLowerCase().includes(query));
   }, [photos, search]);
   const selectedPhotoSet = useMemo(() => new Set(selectedPhotoIds), [selectedPhotoIds]);
+  const duplicatePhotoIds = useMemo(() => duplicateGroups.flatMap((group) => group.duplicateIds), [duplicateGroups]);
+  const duplicateReclaimableBytes = useMemo(
+    () => duplicateGroups.reduce((sum, group) => sum + group.reclaimableBytes, 0),
+    [duplicateGroups],
+  );
   const selectableVisiblePhotos = visiblePhotos.slice(0, MAX_BATCH_SELECTION);
+  const previewImages = useMemo(() => visiblePhotos.filter((photo) => !isVideoMimeType(photo.mimeType) && !isDocumentMimeType(photo.mimeType)), [visiblePhotos]);
+  const previewIndex = preview ? previewImages.findIndex((photo) => photo.id === preview.id) : -1;
   const allVisibleSelected = selectableVisiblePhotos.length > 0 && selectableVisiblePhotos.every((photo) => selectedPhotoSet.has(photo.id));
   const moveTargets = useMemo(
     () => showRecycleBin ? [] : selectedFolder ? folders.filter((folder) => folder.slug !== selectedFolder) : folders,
@@ -627,17 +686,24 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     setUploads((current) => current.map((item) => (item.id === id ? { ...item, ...change } : item)));
   };
 
-  const uploadFiles = async (fileList: FileList | File[]) => {
-    const files = Array.from(fileList).filter((file) => Boolean(mediaInfo(file.name, fileMimeType(file))));
+  const uploadFiles = async (fileList: FileList | File[], documentMode = false) => {
+    const files = Array.from(fileList).filter((file) => {
+      const media = mediaInfo(file.name, fileMimeType(file));
+      return Boolean(media && (documentMode ? media.kind === "document" : media.kind !== "document"));
+    });
     if (!files.length) {
-      setError("请选择 JPG、PNG、WebP、GIF、HEIC、MP4、MOV、M4V、WebM 或 MPEG 文件");
+      setError(documentMode ? "请选择 PDF、DOC 或 DOCX 文档" : "请选择 JPG、PNG、WebP、GIF、HEIC、MP4、MOV、M4V、WebM 或 MPEG 文件");
       return;
     }
-    if (!selectedFolder) {
+    if (!documentMode && !selectedFolder) {
       setError("请先选择或新建一个文件夹");
       return;
     }
-    if (!canUpload) {
+    if (documentMode && !canDirectUpload) {
+      setError("需要上传权限才能上传文档");
+      return;
+    }
+    if (!documentMode && !canUpload) {
       setError("这个链接没有上传权限，请使用管理口令或文件夹上传链接");
       return;
     }
@@ -658,14 +724,19 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         const sizeError = mediaSizeError(media.kind, file.size);
         if (sizeError) throw new Error(sizeError);
         const dimensions = await mediaDimensions(file);
-        await uploadToCloudBase(
-          selectedFolder,
-          canDirectUpload ? "" : sharedUploadToken,
+        const targetFolder = media.kind === "document" ? DOCUMENT_FOLDER_SLUG : selectedFolder;
+        const result = await uploadToCloudBase(
+          targetFolder,
+          media.kind === "document" || canDirectUpload ? "" : sharedUploadToken,
           file,
           dimensions,
           (progress) => updateUpload(uploadId, { progress }),
         );
-        updateUpload(uploadId, { progress: 100, status: "done" });
+        updateUpload(uploadId, {
+          progress: 100,
+          status: "done",
+          error: result.duplicate ? "已跳过：相同图片已存在" : undefined,
+        });
       } catch (cause) {
         updateUpload(uploadId, {
           status: "error",
@@ -673,7 +744,17 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         });
       }
     }
-    await loadLibrary(selectedFolder);
+    if (documentMode) {
+      setSelectedFolder(DOCUMENT_FOLDER_SLUG);
+      setShowRecycleBin(false);
+      const url = new URL(window.location.href);
+      url.searchParams.set("folder", DOCUMENT_FOLDER_SLUG);
+      url.searchParams.delete("upload");
+      window.history.replaceState({}, "", url);
+      await loadLibrary(DOCUMENT_FOLDER_SLUG);
+    } else {
+      await loadLibrary(selectedFolder);
+    }
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -684,6 +765,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files) void uploadFiles(event.target.files);
+    event.target.value = "";
+  };
+
+  const onDocumentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) void uploadFiles(event.target.files, true);
     event.target.value = "";
   };
 
@@ -991,9 +1077,32 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const openPreview = (photo: PhotoItem) => {
+    if (isDocumentMimeType(photo.mimeType)) {
+      logMediaAccess(photo, "media.view");
+      window.open(photo.url, "_blank", "noopener,noreferrer");
+      return;
+    }
     setPreview(photo);
     logMediaAccess(photo, "media.view");
   };
+
+  const showAdjacentPreview = (direction: -1 | 1) => {
+    if (!preview || !previewImages.length || previewIndex < 0) return;
+    const next = previewImages[(previewIndex + direction + previewImages.length) % previewImages.length];
+    setPreview(next);
+    logMediaAccess(next, "media.view");
+  };
+
+  useEffect(() => {
+    if (!preview) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreview(null);
+      if (event.key === "ArrowLeft") showAdjacentPreview(-1);
+      if (event.key === "ArrowRight") showAdjacentPreview(1);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [preview, previewImages, previewIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = async () => {
     await fetch("/api/auth/session", { method: "DELETE" });
@@ -1002,6 +1111,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
 
   const loadAdminData = async (section: AdminSection = adminSection) => {
     if (section === "users" && !canOpenPeople) return;
+    if (section === "duplicates" && !isSuperAdmin) return;
     if (section === "logs" && !isSuperAdmin) return;
     setAdminLoading(true);
     setError("");
@@ -1009,6 +1119,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
       if (section === "users") {
         const result = await readJson<{ users: ManagedAlbumUser[] }>(await fetch("/api/admin/users"));
         setManagedUsers(result.users);
+      } else if (section === "duplicates") {
+        const result = await readJson<{ groups: DuplicateGroup[]; scannedCount: number; hashedCount: number }>(
+          await fetch("/api/admin/duplicates", { method: "POST" }),
+        );
+        setDuplicateGroups(result.groups);
+        setDedupeScannedCount(result.scannedCount);
+        setDedupeHashedCount(result.hashedCount);
       } else {
         const result = await readJson<{ logs: AlbumAuditLog[] }>(await fetch("/api/admin/audit-logs?limit=200"));
         setAuditLogs(result.logs);
@@ -1021,16 +1138,36 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const openAdminView = (section: AdminSection = "users") => {
-    const nextSection = section === "logs" && !isSuperAdmin ? "users" : section;
+    const nextSection = (section === "logs" || section === "duplicates") && !isSuperAdmin ? "users" : section;
     setActiveView("admin");
     setAdminSection(nextSection);
     void loadAdminData(nextSection);
   };
 
   const switchAdminSection = (section: AdminSection) => {
-    if (section === "logs" && !isSuperAdmin) return;
+    if ((section === "logs" || section === "duplicates") && !isSuperAdmin) return;
     setAdminSection(section);
     void loadAdminData(section);
+  };
+
+  const recycleDuplicatePhotos = async () => {
+    if (!isSuperAdmin || !duplicatePhotoIds.length || dedupeSaving) return;
+    setDedupeSaving(true);
+    setError("");
+    try {
+      const result = await readJson<{ recycledCount: number }>(await fetch("/api/admin/duplicates", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: duplicatePhotoIds }),
+      }));
+      setError(`已将 ${result.recycledCount} 张重复图片移入回收站，7 天后自动永久删除。`);
+      await loadAdminData("duplicates");
+      await loadLibrary(selectedFolder, showRecycleBin);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "回收重复图片失败");
+    } finally {
+      setDedupeSaving(false);
+    }
   };
 
   const updateManagedUser = async (
@@ -1186,7 +1323,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             {!showRecycleBin && <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
               <Upload size={18} /> 上传影像
             </button>}
+            {!showRecycleBin && <button className="secondary-button" onClick={() => documentInput.current?.click()} disabled={!canDirectUpload} title={canDirectUpload ? "上传 PDF 或 Word 文档" : "需要上传权限"}>
+              <FileText size={17} /> 上传文档
+            </button>}
             <input ref={fileInput} type="file" accept="image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,video/mpeg,.mov,.m4v" multiple hidden onChange={onFileChange} />
+            <input ref={documentInput} type="file" accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.doc,.docx" multiple hidden onChange={onDocumentChange} />
           </div>
         </header>
 
@@ -1297,13 +1438,15 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                     onClick={() => editMode ? togglePhotoSelection(photo.id) : openPreview(photo)}
                     aria-label={editMode ? `${selectedPhotoSet.has(photo.id) ? "取消选择" : "选择"} ${photo.name}` : `预览 ${photo.name}`}
                   >
-                    {isVideoMimeType(photo.mimeType)
-                      ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
-                      : <img src={photo.previewUrl || photo.url} alt={photo.name} loading="lazy" />}
+                    {isDocumentMimeType(photo.mimeType)
+                      ? <span className="document-preview"><FileText size={34} /><b>{photo.mimeType.includes("pdf") ? "PDF" : "Word"}</b></span>
+                      : isVideoMimeType(photo.mimeType)
+                        ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
+                        : <img src={photo.previewUrl || photo.url} alt={photo.name} loading="lazy" />}
                     {isVideoMimeType(photo.mimeType) && <span className="play-badge"><Play size={19} fill="currentColor" /></span>}
                     {editMode
                       ? <span className="selection-mark">{selectedPhotoSet.has(photo.id) && <Check size={17} strokeWidth={3} />}</span>
-                      : <span className="expand"><Maximize2 size={16} /></span>}
+                      : !isDocumentMimeType(photo.mimeType) && <span className="expand"><Maximize2 size={16} /></span>}
                   </button>
                   <div className="photo-meta">
                     <div>
@@ -1364,7 +1507,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           <header className="topbar">
             <div className="breadcrumb">
               <span>管理</span><ChevronRight size={15} />
-              <strong>{adminSection === "users" ? "用户管理" : "访问与操作日志"}</strong>
+              <strong>{adminSection === "users" ? "用户管理" : adminSection === "duplicates" ? "图片去重" : "访问与操作日志"}</strong>
             </div>
             <div className="top-actions">
               <button className="secondary-button" onClick={() => void loadAdminData()} disabled={adminLoading}>
@@ -1392,6 +1535,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 <button className={adminSection === "users" ? "active" : ""} onClick={() => switchAdminSection("users")} role="tab">
                   <Users size={17} /> 用户
                 </button>
+                {isSuperAdmin && (
+                  <button className={adminSection === "duplicates" ? "active" : ""} onClick={() => switchAdminSection("duplicates")} role="tab">
+                    <Images size={17} /> 去重
+                  </button>
+                )}
                 {isSuperAdmin && (
                   <button className={adminSection === "logs" ? "active" : ""} onClick={() => switchAdminSection("logs")} role="tab">
                     <Activity size={17} /> 日志
@@ -1449,6 +1597,46 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                   </div>
                 ))}
                 {!managedUsers.length && <div className="table-empty">还没有用户记录</div>}
+              </div>
+            ) : adminSection === "duplicates" ? (
+              <div className="duplicate-panel">
+                <div className="duplicate-summary">
+                  <div>
+                    <span className="page-eyebrow">精确去重</span>
+                    <h2>发现 {duplicateGroups.length} 组重复图片</h2>
+                    <p>已扫描 {dedupeScannedCount} 张图片，补齐 {dedupeHashedCount} 张历史图片哈希，预计可释放 {formatSize(duplicateReclaimableBytes)}。</p>
+                  </div>
+                  <div className="duplicate-actions">
+                    <button className="secondary-button" onClick={() => void loadAdminData("duplicates")} disabled={adminLoading || dedupeSaving}>
+                      {adminLoading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}
+                      重新扫描
+                    </button>
+                    <button className="danger-button" onClick={() => void recycleDuplicatePhotos()} disabled={!duplicatePhotoIds.length || dedupeSaving || adminLoading}>
+                      {dedupeSaving ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}
+                      移入回收站 {duplicatePhotoIds.length} 张
+                    </button>
+                  </div>
+                </div>
+                {duplicateGroups.map((group, groupIndex) => (
+                  <section className="duplicate-group" key={group.contentHash}>
+                    <div className="duplicate-group-heading">
+                      <strong>重复组 {groupIndex + 1}</strong>
+                      <span>保留 1 张，回收 {group.duplicateCount} 张 · {formatSize(group.reclaimableBytes)}</span>
+                    </div>
+                    <div className="duplicate-photo-list">
+                      {group.photos.map((photo) => (
+                        <div className={`duplicate-photo-row ${photo.id === group.keepPhotoId ? "keep" : ""}`} key={photo.id}>
+                          <span className="action-tag">{photo.id === group.keepPhotoId ? "保留" : "回收"}</span>
+                          <strong>{photo.name}</strong>
+                          <small>{photo.folderName} · {formatSize(photo.size)} · {formatFullDate(photo.createdAt)}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+                {!duplicateGroups.length && (
+                  <div className="table-empty">没有发现完全相同的重复图片</div>
+                )}
               </div>
             ) : (
               <div className="management-table audit-table" role="table" aria-label="访问与操作日志">
@@ -1701,6 +1889,16 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             </div>
           </div>
           <div className="preview-canvas" onClick={() => setPreview(null)}>
+            {!isVideoMimeType(preview.mimeType) && !isDocumentMimeType(preview.mimeType) && previewImages.length > 1 && (
+              <>
+                <button className="preview-nav previous" onClick={(event) => { event.stopPropagation(); showAdjacentPreview(-1); }} aria-label="上一张图片">
+                  <ArrowLeft size={26} />
+                </button>
+                <button className="preview-nav next" onClick={(event) => { event.stopPropagation(); showAdjacentPreview(1); }} aria-label="下一张图片">
+                  <ArrowRight size={26} />
+                </button>
+              </>
+            )}
             {isVideoMimeType(preview.mimeType)
               ? <video src={preview.url} controls autoPlay playsInline onClick={(event) => event.stopPropagation()} />
               : <img src={preview.previewUrl || preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />}

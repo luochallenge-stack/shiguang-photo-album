@@ -27,6 +27,7 @@ export type AlbumPhoto = {
   width: number | null;
   height: number | null;
   coverFileId?: string;
+  contentHash?: string;
   createdAt: string;
   deletedAt?: string;
   purgeAt?: string;
@@ -111,6 +112,9 @@ const COLLECTIONS = {
   auditLogs: "album_audit_logs",
   mediaShares: "album_media_shares",
 } as const;
+
+export const DOCUMENT_FOLDER_SLUG = "documents";
+export const DOCUMENT_FOLDER_NAME = "文档资料";
 
 let app: ReturnType<typeof cloudbaseSdk.init> | null = null;
 
@@ -334,6 +338,64 @@ export async function createPhotoRecord(photo: AlbumPhoto): Promise<void> {
 export async function findPhoto(id: string): Promise<AlbumPhoto | null> {
   const result = await database().collection(COLLECTIONS.photos).doc(id).get();
   return rows<AlbumPhoto>(result)[0] || null;
+}
+
+export async function findActivePhotoByContentHash(
+  contentHash: string,
+  folderSlugs?: string[],
+): Promise<AlbumPhoto | null> {
+  if (!contentHash || (folderSlugs && folderSlugs.length === 0)) return null;
+  const command = database().command;
+  const filter = {
+    ...activePhotoFilter(),
+    contentHash,
+    ...(folderSlugs?.length ? { folderSlug: command.in(folderSlugs) } : {}),
+  };
+  const result = await database().collection(COLLECTIONS.photos).where(filter).orderBy("createdAt", "asc").limit(1).get();
+  return rows<AlbumPhoto>(result)[0] || null;
+}
+
+export async function ensureDocumentFolder(creatorUserId = "system"): Promise<AlbumFolder> {
+  const existing = await findFolderIncludingDeleted(DOCUMENT_FOLDER_SLUG);
+  if (existing) {
+    if (existing.deletedAt) await restoreDeletedFolderRecord(existing.id);
+    return { ...existing, deletedAt: "" };
+  }
+  const createdAt = new Date().toISOString();
+  const folder: AlbumFolder = {
+    id: "system-documents",
+    name: DOCUMENT_FOLDER_NAME,
+    slug: DOCUMENT_FOLDER_SLUG,
+    createdAt,
+    creatorUserId,
+    visibilityType: "all",
+    visibleUserIds: [],
+    sortOrder: 0,
+  };
+  await database().collection(COLLECTIONS.folders).doc(folder.id).set(folder);
+  return folder;
+}
+
+export async function listActivePhotosForDedup(max = 1000): Promise<AlbumPhoto[]> {
+  const photos: AlbumPhoto[] = [];
+  for (let offset = 0; photos.length < max; offset += 100) {
+    const result = await database()
+      .collection(COLLECTIONS.photos)
+      .where(activePhotoFilter())
+      .orderBy("createdAt", "asc")
+      .skip(offset)
+      .limit(Math.min(100, max - photos.length))
+      .get();
+    const page = rows<AlbumPhoto>(result);
+    if (!page.length) break;
+    photos.push(...page);
+    if (page.length < 100) break;
+  }
+  return photos.filter((photo) => photo.mimeType.startsWith("image/"));
+}
+
+export async function updatePhotoContentHash(id: string, contentHash: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({ contentHash });
 }
 
 function operationFields(action: NonNullable<AlbumPhoto["lastAction"]>, actorName: string, at = new Date().toISOString()) {

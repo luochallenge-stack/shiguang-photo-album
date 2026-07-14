@@ -86,7 +86,8 @@ test("keeps CloudBase credentials server-side", async () => {
 test("limits desktop image previews to 70 percent of the viewport", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(styles, /@media \(min-width: 681px\)/);
-  assert.match(styles, /\.preview-canvas img \{ max-width: 70vw; max-height: 70vh; \}/);
+  assert.match(styles, /\.preview-canvas img, \.preview-canvas video \{ max-width: 70vw; max-height: 70vh; \}/);
+  assert.match(styles, /\.photo-preview video \{[^}]*object-fit: contain/);
 });
 
 test("creates 24-hour public image links without exposing album sessions", async () => {
@@ -228,12 +229,12 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.doesNotMatch(library, /saveFolderPassword|removeFolderPassword|unlockFolder/);
   assert.match(library, /\/api\/folders\/name/);
   assert.match(library, /openMediaActions/);
-  assert.match(library, /shareOriginalImage/);
-  assert.match(library, /shareOriginalFile/);
+  assert.match(library, /createMediaShareLink/);
+  assert.match(library, /复制24小时查看链接/);
   assert.match(library, /wx\.downloadFile/);
-  assert.match(library, /wx\.showShareImageMenu/);
-  assert.match(library, /wx\.shareFileMessage/);
-  assert.match(library, /media\.share/);
+  assert.doesNotMatch(library, /shareOriginalImage|shareOriginalFile/);
+  assert.doesNotMatch(library, /wx\.showShareImageMenu|wx\.shareFileMessage/);
+  assert.match(library, /\/api\/photos\/share/);
   assert.match(library, /method: "PATCH"/);
   assert.match(libraryTemplate, /folder-manage-button/);
   assert.match(libraryTemplate, /media-more/);
@@ -261,7 +262,13 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /uploadSelectedMedia/);
   assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
+  assert.match(viewer, /mode="aspectFit"/);
+  assert.match(viewer, /switchImage/);
+  assert.match(viewer, /closeImage/);
+  assert.match(viewer, /object-fit="contain"/);
   assert.match(viewerLogic, /api\/photos\/url/);
+  assert.match(viewerLogic, /albumViewerPhotos/);
+  assert.match(viewerLogic, /mode: "image"/);
   assert.match(viewerLogic, /encodeURI\(url\)/);
   assert.match(viewerLogic, /handleVideoError/);
   assert.match(libraryRoute, /MINI_PROGRAM_PAGE_SIZE = 24/);
@@ -271,6 +278,46 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(mediaUrlRoute, /canUserReadFolder/);
   assert.match(auth, /authorization\.startsWith\("Bearer "\)/);
   assert.doesNotMatch(accessControl + api + library, /x-album-folder-token/);
+});
+
+test("supports exact image dedupe and document uploads", async () => {
+  const [client, uploadRoute, multipartRoute, duplicatesRoute, cloudbase, media, miniLibrary, miniTemplate, urlRoute] = await Promise.all([
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/duplicates/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/media.ts", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(media, /MediaKind = "image" \| "video" \| "document"/);
+  assert.match(media, /application\/pdf/);
+  assert.match(media, /application\/msword/);
+  assert.match(media, /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
+  assert.match(client, /fileContentHash/);
+  assert.match(client, /上传文档/);
+  assert.match(client, /DOCUMENT_FOLDER_SLUG/);
+  assert.match(client, /isDocumentMimeType/);
+  assert.match(uploadRoute, /contentHash/);
+  assert.match(uploadRoute, /findActivePhotoByContentHash/);
+  assert.match(uploadRoute, /media\.dedupe\.skip/);
+  assert.match(uploadRoute, /ensureDocumentFolder/);
+  assert.match(multipartRoute, /sha256Hex/);
+  assert.match(multipartRoute, /duplicate: true/);
+  assert.match(duplicatesRoute, /media\.dedupe\.scan/);
+  assert.match(duplicatesRoute, /media\.dedupe\.recycle/);
+  assert.match(cloudbase, /DOCUMENT_FOLDER_SLUG = "documents"/);
+  assert.match(cloudbase, /ensureDocumentFolder/);
+  assert.match(cloudbase, /updatePhotoContentHash/);
+  assert.match(miniLibrary, /chooseMessageFile/);
+  assert.match(miniLibrary, /chooseDocument/);
+  assert.match(miniLibrary, /uploadDocuments/);
+  assert.match(miniLibrary, /wx\.openDocument/);
+  assert.match(miniTemplate, /document-upload-button/);
+  assert.match(urlRoute, /document\.open/);
+  assert.match(urlRoute, /video \|\| document \? resolvedUrl : orientedImageUrl/);
 });
 
 test("enforces identity-based folder visibility across backend entry points", async () => {

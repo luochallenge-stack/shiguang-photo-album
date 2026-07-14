@@ -67,6 +67,7 @@
     <view wx:if="{{user.canUpload || user.canEdit || user.canDelete}}" class="heading-actions">
       <button wx:if="{{user.canEdit || user.canDelete}}" class="edit-button {{editMode ? 'active' : ''}}" bindtap="toggleEditMode" disabled="{{uploading || batchSaving || photos.length === 0}}">{{editMode ? '完成' : '编辑'}}</button>
       <button wx:if="{{user.canUpload && !editMode && !recycleMode}}" class="upload-button" bindtap="chooseMedia" disabled="{{uploading}}">＋ 上传</button>
+      <button wx:if="{{user.canUpload && !editMode && !recycleMode}}" class="upload-button document-upload-button" bindtap="chooseDocument" disabled="{{uploading}}">文档</button>
     </view>
   </view>
 
@@ -91,11 +92,11 @@
     <view class="media-item {{item.selected ? 'selected' : ''}}" wx:for="{{photos}}" wx:key="id" data-id="{{item.id}}" bindtap="openMedia">
       <view class="media-preview">
         <image wx:if="{{item.thumbnailUrl}}" src="{{item.thumbnailUrl}}" mode="aspectFill" lazy-load data-id="{{item.id}}" binderror="thumbnailError" />
-        <view wx:else class="video-placeholder"><text>{{item.video ? '视频' : '影像'}}</text></view>
+        <view wx:else class="video-placeholder document-placeholder"><text>{{item.document ? item.documentType : item.video ? '视频' : '影像'}}</text></view>
         <view wx:if="{{item.video}}" class="video-play-overlay">
           <view class="play-button"><view class="play-triangle" /></view>
         </view>
-        <button wx:if="{{!editMode && (!item.video || user.canEdit)}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="转发或编辑影像">···</button>
+        <button wx:if="{{!editMode && ((!item.video && !item.document) || user.canEdit)}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="转发或编辑影像">···</button>
         <view wx:if="{{editMode}}" class="media-select {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</view>
       </view>
       <view class="media-copy">

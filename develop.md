@@ -207,12 +207,19 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - `/api/library` 为列表中当前页媒体生成临时地址。
 - 双端图片预览使用 CloudBase `imageMogr2/auto-orient` 按 EXIF 自动回正；小程序列表在此基础上生成 640x640 WebP 缩略图。
 - 小程序打开图片或视频时调用 `GET /api/photos/url?id=...` 刷新地址。
-- 小程序“发送给朋友（原文件）”先把原始文件下载到带正确扩展名的本地路径，再调用 `wx.shareFileMessage`；“图片分享与保存”下载自动回正后的图片并调用 `wx.showShareImageMenu`，不要转发列表缩略图。
-- 小程序可为单张图片生成 24 小时公开链接。`POST /api/photos/share` 写入哈希令牌记录，公开页 `/s/{token}`、预览和下载路由每次都校验过期时间；图片被删除后链接立即失效，令牌不可替代站内会话访问其他资源。
+- 小程序已下线原生“发送给朋友（原文件）”和“图片分享与保存”，单张图片只保留“复制 24 小时查看链接”。`POST /api/photos/share` 写入哈希令牌记录，公开页 `/s/{token}`、预览和下载路由每次都校验过期时间；图片被删除后链接立即失效，令牌不可替代站内会话访问其他资源。
+- Web 大图预览和小程序图片查看页都支持左右切换；Web 支持 `Esc` 退出，小程序再次点击放大图片退出。视频在列表、预览和小程序播放器中都按原始比例 `contain` 缩放。
 - 图片刷新地址有效期 10 分钟，视频刷新地址有效期 2 小时。
 - `GET /api/photos/url` 必须先检查所属文件夹的读取权限，并返回 `cache-control: no-store`。
 - 中文文件夹或文件名可能出现在临时 URL 中，小程序赋给 `<video>` 或预览组件前必须保留 `encodeURI(url)`。
 - CloudBase 视频支持 HTTP Range；不要把视频先完整下载到小程序本地再播放。
+
+## 7.1 图片去重与文档
+
+- 图片使用 SHA-256 内容哈希做精确去重。Web 直传会在浏览器端计算 `contentHash`，小程序 multipart 上传由服务端读取文件后计算；如果当前用户可见范围内已有同哈希图片，接口返回 `duplicate: true` 并跳过写入。
+- 超级管理员的“图片去重”页调用 `POST /api/admin/duplicates` 扫描最多 1000 张活跃图片，给历史图片补齐 `contentHash`，按哈希分组展示；`DELETE /api/admin/duplicates` 会把重复项移入回收站，仍遵循 7 天后自动清理。
+- 文档上传只允许 PDF、DOC、DOCX，单个最大 100 MB。文档统一进入系统文件夹 `documents`（显示名“文档资料”），由 `ensureDocumentFolder` 自动创建或恢复。
+- 文档刷新地址不能套图片处理参数；`GET /api/photos/url` 对文档直接返回原始临时 URL，小程序通过 `wx.openDocument` 打开。
 
 ## 8. API 约定
 

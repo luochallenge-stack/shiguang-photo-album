@@ -3,7 +3,7 @@ import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { findFolder, findFolderIncludingDeleted, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
 import { orientedImageUrl } from "../../../../lib/image-url";
-import { isVideoMimeType } from "../../../../lib/media";
+import { isDocumentMimeType, isVideoMimeType } from "../../../../lib/media";
 
 export async function GET(request: Request) {
   const user = await currentUser(request);
@@ -23,10 +23,11 @@ export async function GET(request: Request) {
     if (photo.deletedAt && !canDeleteMedia(user)) return forbidden();
 
     const video = isVideoMimeType(photo.mimeType);
+    const document = isDocumentMimeType(photo.mimeType);
     const [url] = await resolvePhotoUrls([photo.fileId], video ? 2 * 60 * 60 : 10 * 60);
     await recordAudit(request, user, {
-      action: video ? "video.play" : "image.preview",
-      resourceType: video ? "video" : "image",
+      action: video ? "video.play" : document ? "document.open" : "image.preview",
+      resourceType: video ? "video" : document ? "document" : "image",
       resourceId: photo.id,
       resourceName: photo.name,
       metadata: { folderSlug: photo.folderSlug },
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
     const resolvedUrl = url || photo.url;
     return Response.json({
       url: resolvedUrl,
-      displayUrl: video ? resolvedUrl : orientedImageUrl(resolvedUrl),
+      displayUrl: video || document ? resolvedUrl : orientedImageUrl(resolvedUrl),
       mimeType: photo.mimeType,
     }, {
       headers: { "cache-control": "no-store" },

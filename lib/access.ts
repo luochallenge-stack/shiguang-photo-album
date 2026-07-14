@@ -40,6 +40,7 @@ export type MediaUploadTicket = {
   mimeType: string;
   width: number | null;
   height: number | null;
+  contentHash?: string;
   expiresAt: number;
 };
 

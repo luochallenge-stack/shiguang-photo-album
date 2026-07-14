@@ -1,4 +1,5 @@
 import {
+  canUserReadFolder,
   canWriteFolder,
   createMediaUploadTicket,
   readMediaUploadTicket,
@@ -9,17 +10,28 @@ import {
   createDirectUpload,
   createObjectKey,
   createPhotoRecord,
+  deletePhotoFile,
+  DOCUMENT_FOLDER_SLUG,
+  ensureDocumentFolder,
+  findActivePhotoByContentHash,
   findFolder,
+  listFolders,
   resolvePhotoUrls,
   type AlbumPhoto,
 } from "../../../../lib/cloudbase";
 import { currentUser, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 import { mediaInfo, mediaSizeError } from "../../../../lib/media";
+import { normalizeContentHash } from "../../../../lib/content-hash";
 
 function dimension(value: unknown): number | null {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 && number <= 100_000 ? number : null;
+}
+
+async function visibleFolderSlugsFor(user: NonNullable<Awaited<ReturnType<typeof currentUser>>>) {
+  const folders = await listFolders();
+  return folders.filter((folder) => canUserReadFolder(folder, user)).map((folder) => folder.slug);
 }
 
 export async function POST(request: Request) {
@@ -34,20 +46,39 @@ export async function POST(request: Request) {
       mimeType?: unknown;
       width?: unknown;
       height?: unknown;
+      contentHash?: unknown;
     };
-    const folderSlug = typeof body.folderSlug === "string" ? body.folderSlug.trim() : "";
+    let folderSlug = typeof body.folderSlug === "string" ? body.folderSlug.trim() : "";
     const uploadToken = typeof body.uploadToken === "string" ? body.uploadToken : "";
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 180) : "";
     const size = Number(body.size);
     const providedMimeType = typeof body.mimeType === "string" ? body.mimeType : "";
+    const contentHash = normalizeContentHash(body.contentHash);
     const media = mediaInfo(name, providedMimeType);
     if (!folderSlug || !name || !Number.isSafeInteger(size) || !media) {
-      return Response.json({ error: "图片或视频信息无效" }, { status: 400 });
+      return Response.json({ error: "图片、视频或文档信息无效" }, { status: 400 });
+    }
+    if (media.kind === "document") {
+      folderSlug = DOCUMENT_FOLDER_SLUG;
+      await ensureDocumentFolder(user.id);
     }
     const sizeError = mediaSizeError(media.kind, size);
     if (sizeError) return Response.json({ error: sizeError }, { status: 413 });
     if (!(await canWriteFolder(request, folderSlug, uploadToken, user))) return unauthorized();
     if (!(await findFolder(folderSlug))) return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
+    const duplicate = media.kind === "image" && contentHash
+      ? await findActivePhotoByContentHash(contentHash, await visibleFolderSlugsFor(user))
+      : null;
+    if (duplicate) {
+      await recordAudit(request, user, {
+        action: "media.dedupe.skip",
+        resourceType: "image",
+        resourceId: duplicate.id,
+        resourceName: duplicate.name,
+        metadata: { folderSlug: duplicate.folderSlug, targetFolderSlug: folderSlug, size },
+      });
+      return Response.json({ duplicate: true, photo: duplicate });
+    }
 
     const objectKey = createObjectKey(folderSlug, name);
     const directUpload = await createDirectUpload(objectKey, media.mimeType);
@@ -61,6 +92,7 @@ export async function POST(request: Request) {
       mimeType: media.mimeType,
       width: dimension(body.width),
       height: dimension(body.height),
+      ...(contentHash ? { contentHash } : {}),
     });
     return Response.json({
       upload: {
@@ -91,6 +123,20 @@ export async function PATCH(request: Request) {
     }
 
     await confirmUploadedFile(ticket.fileId, ticket.size);
+    const duplicate = ticket.contentHash && media.kind === "image"
+      ? await findActivePhotoByContentHash(ticket.contentHash, await visibleFolderSlugsFor(user))
+      : null;
+    if (duplicate) {
+      await deletePhotoFile(ticket.fileId).catch((error) => console.error("Failed to remove duplicate direct upload", error));
+      await recordAudit(request, user, {
+        action: "media.dedupe.skip",
+        resourceType: "image",
+        resourceId: duplicate.id,
+        resourceName: duplicate.name,
+        metadata: { folderSlug: duplicate.folderSlug, targetFolderSlug: ticket.folderSlug, size: ticket.size },
+      });
+      return Response.json({ duplicate: true, photo: duplicate });
+    }
     const createdAt = new Date().toISOString();
     const photo: AlbumPhoto = {
       id: ticket.id,
@@ -103,6 +149,7 @@ export async function PATCH(request: Request) {
       mimeType: ticket.mimeType,
       width: ticket.width,
       height: ticket.height,
+      ...(ticket.contentHash ? { contentHash: ticket.contentHash } : {}),
       createdAt,
       deletedAt: "",
       purgeAt: "",

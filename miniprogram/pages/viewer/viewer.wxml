@@ -1,5 +1,25 @@
 <view class="viewer-page" wx:if="{{media.id}}">
-  <view class="player-shell">
+  <view wx:if="{{mode === 'image'}}" class="image-shell">
+    <image
+      wx:if="{{imageUrl}}"
+      class="image-player"
+      src="{{imageUrl}}"
+      mode="aspectFit"
+      bindtap="closeImage"
+      bindload="handleLoaded"
+      binderror="handleVideoError"
+    />
+    <button wx:if="{{photos.length > 1}}" class="viewer-arrow previous" data-direction="-1" bindtap="switchImage">‹</button>
+    <button wx:if="{{photos.length > 1}}" class="viewer-arrow next" data-direction="1" bindtap="switchImage">›</button>
+    <view class="player-loading" wx:if="{{loading || waiting}}">
+      <text>{{waiting ? '网络缓冲中' : '正在获取图片地址'}}</text>
+    </view>
+    <view class="player-error" wx:if="{{error}}">
+      <text>{{error}}</text>
+      <button bindtap="retry">重新加载</button>
+    </view>
+  </view>
+  <view wx:else class="player-shell">
     <video
       wx:if="{{videoUrl}}"
       id="album-video"
@@ -29,6 +49,6 @@
   </view>
   <view class="video-copy">
     <text class="video-name">{{media.name}}</text>
-    <text class="video-meta">{{media.dateLabel}} · {{media.sizeLabel}}</text>
+    <text class="video-meta">{{media.dateLabel}} · {{media.sizeLabel}}{{mode === 'image' && photos.length > 1 ? ' · ' + (index + 1) + '/' + photos.length : ''}}</text>
   </view>
 </view>

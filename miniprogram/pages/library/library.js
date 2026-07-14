@@ -4,9 +4,12 @@ const PAGE_SIZE = 24;
 const COMPRESS_THRESHOLD = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 const MAX_UPLOAD_COUNT = 50;
 const PICKER_BATCH_SIZE = 9;
 const MAX_BATCH_ACTION_COUNT = 100;
+const DOCUMENT_FOLDER_SLUG = "documents";
+const DOCUMENT_EXTENSIONS = ["pdf", "doc", "docx"];
 const PERMISSION_OPTIONS = [
   { key: "read", label: "访问" },
   { key: "upload", label: "上传" },
@@ -17,7 +20,6 @@ const PERMISSION_OPTIONS = [
 ];
 let libraryRequestId = 0;
 let pendingUploadFiles = [];
-let lastShareFilePath = "";
 const generatingCoverIds = new Set();
 
 function formatSize(value) {
@@ -34,17 +36,6 @@ function formatDate(value) {
 
 function mediaUrl(value) {
   return value ? encodeURI(value) : "";
-}
-
-function shareFileName(item) {
-  const mimeType = String(item && item.mimeType || "").toLowerCase();
-  const fallbackExtension = mimeType.includes("png") ? "png" : mimeType.includes("gif") ? "gif" : "jpg";
-  let name = String(item && item.name || `原图.${fallbackExtension}`)
-    .replace(/[\\/:*?"<>|\r\n]/g, "-")
-    .trim()
-    .slice(0, 100);
-  if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = `${name || "原图"}.${fallbackExtension}`;
-  return name;
 }
 
 function operationLabel(photo) {
@@ -122,6 +113,17 @@ function isVideoFile(file) {
   return /\.(mp4|mov|m4v|webm|mpeg|mpg)(?:\?|$)/i.test(String(file && file.tempFilePath || ""));
 }
 
+function isDocumentName(name) {
+  return /\.(pdf|doc|docx)$/i.test(String(name || ""));
+}
+
+function isDocumentMime(mimeType) {
+  const value = String(mimeType || "").toLowerCase();
+  return value === "application/pdf"
+    || value === "application/msword"
+    || value === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+}
+
 function uploadName(file, index) {
   const path = file && file.tempFilePath;
   const extensionMatch = String(path || "").match(/\.([a-zA-Z0-9]{2,5})(?:\?|$)/);
@@ -150,6 +152,7 @@ function compressIfNeeded(file) {
 function uploadSizeError(file) {
   const size = Number(file && file.size) || 0;
   if (!size) return "";
+  if (isDocumentName(file.name || file.tempFilePath)) return size > MAX_DOCUMENT_BYTES ? "文档不能超过 100 MB" : "";
   if (isVideoFile(file) && size > MAX_VIDEO_BYTES) return "视频不能超过 500 MB";
   if (!isVideoFile(file) && size > MAX_IMAGE_BYTES) return "图片不能超过 50 MB";
   return "";
@@ -278,12 +281,15 @@ Page({
         const selected = folders.find((folder) => folder.slug === folderSlug);
         const photos = payload.photos.map((photo) => {
           const video = String(photo.mimeType || "").startsWith("video/");
+          const document = isDocumentMime(photo.mimeType);
           return {
             ...photo,
             url: mediaUrl(photo.url),
             previewUrl: mediaUrl(photo.previewUrl || photo.url),
-            thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video ? "" : photo.previewUrl || photo.url)),
+            thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video || document ? "" : photo.previewUrl || photo.url)),
             video,
+            document,
+            documentType: String(photo.mimeType || "").includes("pdf") ? "PDF" : "Word",
             sizeLabel: formatSize(photo.size || 0),
             dateLabel: formatDate(photo.createdAt),
             operatorLabel: operationLabel(photo),
@@ -785,21 +791,44 @@ Page({
     }
     const item = this.data.photos.find((photo) => photo.id === id);
     if (!item) return;
+    if (item.document) {
+      this.openDocument(item);
+      return;
+    }
     if (item.video) {
       wx.setStorageSync("albumCurrentMedia", item);
       wx.navigateTo({ url: "/pages/viewer/viewer" });
       return;
     }
+    const imagePhotos = this.data.photos.filter((photo) => !photo.video && !photo.document);
+    const index = imagePhotos.findIndex((photo) => photo.id === item.id);
+    wx.setStorageSync("albumViewerPhotos", imagePhotos);
+    wx.setStorageSync("albumViewerIndex", Math.max(0, index));
+    wx.navigateTo({ url: "/pages/viewer/viewer?mode=image" });
+  },
+
+  openDocument(item) {
     wx.showLoading({ title: "正在打开" });
     api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`)
       .then((result) => {
-        const current = mediaUrl(result.displayUrl || result.url || item.previewUrl || item.url);
-        const urls = this.data.photos
-          .filter((photo) => !photo.video)
-          .map((photo) => photo.id === item.id ? current : photo.previewUrl || photo.url);
-        wx.previewImage({ current, urls });
+        const url = mediaUrl(result.url || item.url);
+        if (!url) throw new Error("服务器没有返回文档链接");
+        return new Promise((resolve, reject) => {
+          wx.downloadFile({
+            url,
+            timeout: 120000,
+            success: (response) => {
+              if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
+                wx.openDocument({ filePath: response.tempFilePath, showMenu: true, success: resolve, fail: reject });
+                return;
+              }
+              reject(new Error(`下载文档失败 (${response.statusCode})`));
+            },
+            fail: (error) => reject(new Error(error.errMsg || "下载文档失败")),
+          });
+        });
       })
-      .catch((error) => wx.showToast({ title: error.message || "打开图片失败", icon: "none" }))
+      .catch((error) => wx.showToast({ title: error.message || "打开文档失败", icon: "none" }))
       .finally(() => wx.hideLoading());
   },
 
@@ -810,11 +839,7 @@ Page({
     if (!item) return;
     const actions = [];
     const handlers = [];
-    if (!item.video) {
-      actions.push("发送给朋友（原文件）");
-      handlers.push(() => this.shareOriginalFile(item));
-      actions.push("图片分享与保存");
-      handlers.push(() => this.shareOriginalImage(item));
+    if (!item.video && !item.document) {
       actions.push("复制24小时查看链接");
       handlers.push(() => this.createMediaShareLink(item));
     }
@@ -829,46 +854,6 @@ Page({
         if (handlers[tapIndex]) handlers[tapIndex]();
       },
     });
-  },
-
-  async downloadShareImage(item, display = false) {
-    const result = await api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`);
-    const url = mediaUrl(display ? result.displayUrl || result.url : result.url);
-    if (!url) throw new Error("原图地址不可用");
-    const filename = shareFileName(item);
-    const filePath = `${wx.env.USER_DATA_PATH}/${Date.now()}-${filename}`;
-    if (lastShareFilePath) {
-      try { wx.getFileSystemManager().unlinkSync(lastShareFilePath); } catch (error) { void error; }
-    }
-    const downloadedPath = await new Promise((resolve, reject) => {
-      wx.downloadFile({
-        url,
-        filePath,
-        timeout: 120000,
-        success: (response) => {
-          if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
-            resolve(response.tempFilePath);
-            return;
-          }
-          reject(new Error(`下载原图失败 (${response.statusCode})`));
-        },
-        fail: (error) => reject(new Error(error.errMsg || "下载原图失败")),
-      });
-    });
-    lastShareFilePath = downloadedPath;
-    return { filePath: downloadedPath, filename };
-  },
-
-  recordMediaShare(item) {
-    api.request("/api/audit", {
-      method: "POST",
-      data: {
-        action: "media.share",
-        resourceId: item.id,
-        resourceName: item.name,
-        folderSlug: item.folderSlug,
-      },
-    }).catch(() => {});
   },
 
   async createMediaShareLink(item) {
@@ -891,56 +876,6 @@ Page({
       });
     } catch (error) {
       wx.showToast({ title: error.message || "生成分享链接失败", icon: "none", duration: 3000 });
-    } finally {
-      wx.hideLoading();
-    }
-  },
-
-  async shareOriginalFile(item) {
-    if (!item || item.video) return;
-    if (typeof wx.shareFileMessage !== "function") {
-      this.shareOriginalImage(item);
-      return;
-    }
-    wx.showLoading({ title: "正在准备原图", mask: true });
-    try {
-      const local = await this.downloadShareImage(item, false);
-      wx.hideLoading();
-      await new Promise((resolve, reject) => {
-        wx.shareFileMessage({
-          filePath: local.filePath,
-          fileName: local.filename,
-          success: resolve,
-          fail: reject,
-        });
-      });
-      this.recordMediaShare(item);
-    } catch (error) {
-      const message = error && error.errMsg || error && error.message || "发送原图失败";
-      if (!/cancel/i.test(message)) wx.showToast({ title: message, icon: "none", duration: 3000 });
-    } finally {
-      wx.hideLoading();
-    }
-  },
-
-  async shareOriginalImage(item) {
-    if (!item || item.video) return;
-    wx.showLoading({ title: "正在准备原图", mask: true });
-    try {
-      const { filePath } = await this.downloadShareImage(item, true);
-      if (typeof wx.showShareImageMenu !== "function") throw new Error("当前微信版本不支持原图转发");
-      wx.hideLoading();
-      await new Promise((resolve, reject) => {
-        wx.showShareImageMenu({
-          path: filePath,
-          success: resolve,
-          fail: reject,
-        });
-      });
-      this.recordMediaShare(item);
-    } catch (error) {
-      const message = error && error.errMsg || error && error.message || "转发原图失败";
-      if (!/cancel/i.test(message)) wx.showToast({ title: message, icon: "none", duration: 3000 });
     } finally {
       wx.hideLoading();
     }
@@ -1153,6 +1088,61 @@ Page({
     }, () => this.addMoreMedia());
   },
 
+  chooseDocument() {
+    if (!this.data.user.canUpload || this.data.uploading) return;
+    wx.chooseMessageFile({
+      count: 20,
+      type: "file",
+      extension: DOCUMENT_EXTENSIONS,
+      success: ({ tempFiles }) => {
+        const files = (tempFiles || []).filter((file) => isDocumentName(file.name || file.path || file.tempFilePath));
+        if (!files.length) {
+          wx.showToast({ title: "请选择 PDF 或 Word 文档", icon: "none" });
+          return;
+        }
+        this.uploadDocuments(files);
+      },
+    });
+  },
+
+  async uploadDocuments(files) {
+    if (!files.length || this.data.uploading) return;
+    this.setData({ uploading: true, uploadProgress: 0, uploadLabel: `准备上传文档 1/${files.length}` });
+    let completed = 0;
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const sizeError = uploadSizeError(file);
+        if (sizeError) throw new Error(sizeError);
+        const filePath = file.path || file.tempFilePath;
+        if (!filePath) throw new Error("文档路径无效");
+        this.setData({ uploadLabel: `正在上传文档 ${index + 1}/${files.length}` });
+        await api.uploadMedia(filePath, {
+          folderSlug: DOCUMENT_FOLDER_SLUG,
+          name: file.name || `文档-${index + 1}.pdf`,
+          width: "",
+          height: "",
+        }, ({ progress }) => {
+          const overall = Math.round(((index * 100) + progress) / files.length);
+          this.setData({ uploadProgress: overall });
+        });
+        completed += 1;
+      }
+      wx.showToast({ title: `已上传 ${completed} 个文档`, icon: "success" });
+      this.loadLibrary(DOCUMENT_FOLDER_SLUG, true);
+    } catch (error) {
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "上传文档失败", icon: "none", duration: 3000 });
+      if (completed) this.loadLibrary(DOCUMENT_FOLDER_SLUG, true);
+    } finally {
+      this.setData({ uploading: false, uploadProgress: 0, uploadLabel: "" });
+    }
+  },
+
   addMoreMedia() {
     if (this.data.uploading || this.data.selectingMedia) return;
     const remaining = MAX_UPLOAD_COUNT - pendingUploadFiles.length;
@@ -1204,6 +1194,7 @@ Page({
     if (!files.length || this.data.uploading) return;
     this.setData({ uploading: true, uploadProgress: 0, uploadLabel: `准备上传 1/${files.length}` });
     let completed = 0;
+    let duplicateSkipped = 0;
     let coverFailures = 0;
     try {
       for (let index = 0; index < files.length; index += 1) {
@@ -1219,6 +1210,11 @@ Page({
           const overall = Math.round(((index * 100) + progress) / files.length);
           this.setData({ uploadProgress: overall });
         });
+        if (result.duplicate) {
+          duplicateSkipped += 1;
+          completed += 1;
+          continue;
+        }
         if (isVideoFile(file) && !(result.photo && result.photo.coverFileId)) {
           const photoId = result.photo && result.photo.id;
           if (photoId && file.thumbTempFilePath) {
@@ -1239,9 +1235,11 @@ Page({
         completed += 1;
       }
       wx.showToast({
-        title: coverFailures ? `已上传，${coverFailures} 个封面失败` : `已上传 ${completed} 项`,
-        icon: coverFailures ? "none" : "success",
-        duration: coverFailures ? 3000 : 1500,
+        title: duplicateSkipped
+          ? `已上传 ${completed - duplicateSkipped} 项，跳过重复 ${duplicateSkipped} 项`
+          : coverFailures ? `已上传，${coverFailures} 个封面失败` : `已上传 ${completed} 项`,
+        icon: coverFailures || duplicateSkipped ? "none" : "success",
+        duration: coverFailures || duplicateSkipped ? 3000 : 1500,
       });
       this.loadLibrary(this.data.selectedFolder, true);
     } catch (error) {
