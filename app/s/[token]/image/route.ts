@@ -1,4 +1,4 @@
-import { resolveMediaShare } from "../../../../lib/media-share";
+import { redirectSafeUrl, resolveMediaShare } from "../../../../lib/media-share";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -6,6 +6,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
   if (!shared) return new Response("分享链接已失效", { status: 410 });
   return new Response(null, {
     status: 307,
-    headers: { location: shared.displayUrl, "cache-control": "private, no-store" },
+    headers: { location: redirectSafeUrl(shared.displayUrl), "cache-control": "private, no-store" },
   });
 }

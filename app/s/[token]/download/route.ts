@@ -1,4 +1,4 @@
-import { mediaDownloadUrl, resolveMediaShare } from "../../../../lib/media-share";
+import { mediaDownloadUrl, redirectSafeUrl, resolveMediaShare } from "../../../../lib/media-share";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -7,7 +7,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tok
   return new Response(null, {
     status: 307,
     headers: {
-      location: mediaDownloadUrl(shared.originalUrl, shared.photo.name),
+      location: redirectSafeUrl(mediaDownloadUrl(shared.originalUrl, shared.photo.name)),
       "cache-control": "private, no-store",
     },
   });

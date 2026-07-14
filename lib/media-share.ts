@@ -43,3 +43,11 @@ export function mediaDownloadUrl(url: string, filename: string): string {
   const disposition = encodeURIComponent(`attachment; filename="${safeName}"`);
   return `${url}${separator}response-content-disposition=${disposition}`;
 }
+
+export function redirectSafeUrl(url: string): string {
+  try {
+    return new URL(url).toString();
+  } catch {
+    return encodeURI(url);
+  }
+}
