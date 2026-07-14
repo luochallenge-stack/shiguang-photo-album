@@ -65,6 +65,8 @@ type PhotoItem = {
   name: string;
   url: string;
   previewUrl?: string;
+  coverUrl?: string;
+  thumbnailUrl?: string;
   size: number;
   mimeType: string;
   width: number | null;
@@ -215,6 +217,14 @@ function visibilityLabel(type: FolderVisibilityType): string {
   if (type === "admins") return "管理者可见";
   if (type === "specific") return "指定用户可见";
   return "所有人可见";
+}
+
+function imagePreviewUrl(photo: PhotoItem): string {
+  return photo.previewUrl || photo.thumbnailUrl || photo.url;
+}
+
+function videoPosterUrl(photo: PhotoItem): string {
+  return photo.coverUrl || photo.thumbnailUrl || photo.previewUrl || "";
 }
 
 function VisibilityFields({
@@ -509,6 +519,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const fileInput = useRef<HTMLInputElement>(null);
   const documentInput = useRef<HTMLInputElement>(null);
   const libraryRequestId = useRef(0);
+  const imagePreloadCache = useRef<HTMLImageElement[]>([]);
   const isSuperAdmin = initialUser.accountLabel === "alishan-tea";
   const canDirectUpload = initialUser.permissions.upload;
   const canEditMedia = initialUser.permissions.edit;
@@ -1094,6 +1105,23 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   useEffect(() => {
+    if (!preview || isVideoMimeType(preview.mimeType) || isDocumentMimeType(preview.mimeType) || previewIndex < 0) return;
+    const preloadTargets = [
+      preview,
+      previewImages[(previewIndex - 1 + previewImages.length) % previewImages.length],
+      previewImages[(previewIndex + 1) % previewImages.length],
+    ].filter((photo): photo is PhotoItem => Boolean(photo));
+    imagePreloadCache.current = preloadTargets.flatMap((photo) => {
+      const src = imagePreviewUrl(photo);
+      if (!src) return [];
+      const img = new window.Image();
+      img.decoding = "async";
+      img.src = src;
+      return [img];
+    });
+  }, [preview, previewImages, previewIndex]);
+
+  useEffect(() => {
     if (!preview) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPreview(null);
@@ -1441,8 +1469,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                     {isDocumentMimeType(photo.mimeType)
                       ? <span className="document-preview"><FileText size={34} /><b>{photo.mimeType.includes("pdf") ? "PDF" : "Word"}</b></span>
                       : isVideoMimeType(photo.mimeType)
-                        ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
-                        : <img src={photo.previewUrl || photo.url} alt={photo.name} loading="lazy" />}
+                        ? <span className="video-cover">
+                            {videoPosterUrl(photo)
+                              ? <img src={videoPosterUrl(photo)} alt={photo.name} loading="lazy" />
+                              : <Video size={34} />}
+                          </span>
+                        : <img src={imagePreviewUrl(photo)} alt={photo.name} loading="lazy" />}
                     {isVideoMimeType(photo.mimeType) && <span className="play-badge"><Play size={19} fill="currentColor" /></span>}
                     {editMode
                       ? <span className="selection-mark">{selectedPhotoSet.has(photo.id) && <Check size={17} strokeWidth={3} />}</span>
@@ -1900,8 +1932,17 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               </>
             )}
             {isVideoMimeType(preview.mimeType)
-              ? <video src={preview.url} controls autoPlay playsInline onClick={(event) => event.stopPropagation()} />
-              : <img src={preview.previewUrl || preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />}
+              ? <video
+                  key={preview.id}
+                  src={preview.url}
+                  poster={videoPosterUrl(preview) || undefined}
+                  controls
+                  autoPlay
+                  playsInline
+                  preload="metadata"
+                  onClick={(event) => event.stopPropagation()}
+                />
+              : <img src={imagePreviewUrl(preview)} alt={preview.name} onClick={(event) => event.stopPropagation()} />}
           </div>
         </div>
       )}

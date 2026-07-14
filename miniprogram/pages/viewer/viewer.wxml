@@ -34,6 +34,7 @@
       id="album-video"
       class="video-player"
       src="{{videoUrl}}"
+      poster="{{media.thumbnailUrl || media.coverUrl || media.previewUrl || ''}}"
       controls
       show-center-play-btn
       show-fullscreen-btn

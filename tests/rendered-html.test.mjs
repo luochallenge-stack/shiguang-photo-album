@@ -59,7 +59,10 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(client, /LEGACY_ALBUM_HOST/);
   assert.match(client, /PUBLIC_ALBUM_ORIGIN/);
   assert.match(client, /window\.location\.replace/);
-  assert.match(client, /<video src=\{preview\.url\} controls autoPlay playsInline/);
+  assert.match(client, /videoPosterUrl/);
+  assert.match(client, /poster=\{videoPosterUrl\(preview\) \|\| undefined\}/);
+  assert.match(client, /preload="metadata"/);
+  assert.doesNotMatch(client, /<video src=\{photo\.url\} muted playsInline preload="metadata"/);
   assert.doesNotMatch(page + client + layout, /codex-preview|Your site is taking shape/);
 });
 
@@ -87,6 +90,7 @@ test("limits desktop image previews to 70 percent of the viewport", async () => 
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(styles, /@media \(min-width: 681px\)/);
   assert.match(styles, /\.preview-canvas img, \.preview-canvas video \{ max-width: 70vw; max-height: 70vh; \}/);
+  assert.match(styles, /\.video-cover/);
   assert.match(styles, /\.photo-preview video \{[^}]*object-fit: contain/);
 });
 
@@ -262,6 +266,7 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /uploadSelectedMedia/);
   assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
+  assert.match(viewer, /poster="\{\{media\.thumbnailUrl \|\| media\.coverUrl \|\| media\.previewUrl \|\| ''\}\}"/);
   assert.match(viewer, /<swiper/);
   assert.match(viewer, /mode="aspectFit"/);
   assert.match(viewer, /bindchange="handleImageSwiperChange"/);
@@ -274,6 +279,9 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(viewerLogic, /albumViewerPhotos/);
   assert.match(viewerLogic, /mode: "image"/);
   assert.match(viewerLogic, /handleImageSwiperChange/);
+  assert.match(viewerLogic, /prefetchAdjacentImages/);
+  assert.match(viewerLogic, /warmImageCache/);
+  assert.match(viewerLogic, /imagePrefetching/);
   assert.match(viewerLogic, /encodeURI\(url\)/);
   assert.match(viewerLogic, /handleVideoError/);
   assert.match(libraryRoute, /MINI_PROGRAM_PAGE_SIZE = 24/);

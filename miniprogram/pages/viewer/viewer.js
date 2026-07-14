@@ -1,5 +1,12 @@
 const api = require("../../utils/api");
 
+const imagePrefetching = new Set();
+
+function warmImageCache(url) {
+  if (!url || typeof wx.getImageInfo !== "function") return;
+  wx.getImageInfo({ src: url, fail() {} });
+}
+
 Page({
   data: {
     mode: "video",
@@ -42,16 +49,29 @@ Page({
       return;
     }
     const currentUrl = media.viewerUrl || media.previewUrl || media.url || "";
-    this.setData({ media, imageUrl: currentUrl, loading: true, waiting: false, error: "" });
+    const targetId = media.id;
+    this.setData({ media, imageUrl: currentUrl, loading: !currentUrl, waiting: false, error: "" });
     wx.setNavigationBarTitle({ title: media.name || "图片" });
+    if (currentUrl) {
+      warmImageCache(currentUrl);
+      this.prefetchAdjacentImages();
+    }
     api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`)
       .then((result) => {
         const url = encodeURI(result.displayUrl || result.url || media.previewUrl || media.url || "");
         if (!url) throw new Error("服务器没有返回图片链接");
-        const photos = this.data.photos.map((photo, index) => index === this.data.index
+        const photos = this.data.photos.map((photo) => photo.id === targetId
           ? { ...photo, viewerUrl: url }
           : photo);
-        this.setData({ photos, media: { ...media, viewerUrl: url }, imageUrl: url, loading: false });
+        const currentMedia = this.data.media || {};
+        if (currentMedia.id === targetId) {
+          this.setData({ photos, media: { ...currentMedia, viewerUrl: url }, imageUrl: url, loading: false }, () => {
+            warmImageCache(url);
+            this.prefetchAdjacentImages();
+          });
+          return;
+        }
+        this.setData({ photos }, () => this.prefetchAdjacentImages());
       })
       .catch((error) => {
         if (error.statusCode === 401) {
@@ -59,8 +79,42 @@ Page({
           wx.reLaunch({ url: "/pages/login/login" });
           return;
         }
+        if (currentUrl) {
+          this.setData({ loading: false });
+          return;
+        }
         this.setData({ loading: false, error: error.message || "图片加载失败" });
       });
+  },
+
+  prefetchAdjacentImages() {
+    const photos = this.data.photos || [];
+    if (photos.length < 2) return;
+    const previous = photos[(this.data.index - 1 + photos.length) % photos.length];
+    const next = photos[(this.data.index + 1) % photos.length];
+    this.prefetchImage(previous);
+    this.prefetchImage(next);
+  },
+
+  prefetchImage(photo) {
+    if (!photo || !photo.id || imagePrefetching.has(photo.id)) return;
+    const cachedUrl = photo.viewerUrl || "";
+    if (cachedUrl) {
+      warmImageCache(cachedUrl);
+      return;
+    }
+    imagePrefetching.add(photo.id);
+    api.request(`/api/photos/url?id=${encodeURIComponent(photo.id)}`)
+      .then((result) => {
+        const url = encodeURI(result.displayUrl || result.url || photo.previewUrl || photo.url || "");
+        if (!url) return;
+        const photos = this.data.photos.map((item) => item.id === photo.id ? { ...item, viewerUrl: url } : item);
+        const state = { photos };
+        if (this.data.media && this.data.media.id === photo.id) state.media = { ...this.data.media, viewerUrl: url };
+        this.setData(state, () => warmImageCache(url));
+      })
+      .catch(() => {})
+      .finally(() => imagePrefetching.delete(photo.id));
   },
 
   handleImageSwiperChange(event) {

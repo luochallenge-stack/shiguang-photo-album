@@ -285,6 +285,7 @@ Page({
           return {
             ...photo,
             url: mediaUrl(photo.url),
+            coverUrl: mediaUrl(photo.coverUrl || ""),
             previewUrl: mediaUrl(photo.previewUrl || photo.url),
             thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video || document ? "" : photo.previewUrl || photo.url)),
             video,
