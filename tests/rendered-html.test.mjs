@@ -69,7 +69,7 @@ test("builds the authenticated photo and video album surface", async () => {
 });
 
 test("supports non-blocking HLS transcode for weak-network video playback", async () => {
-  const [packageJson, client, uploadRoute, multipartRoute, urlRoute, hlsRoute, transcodeRoute, hlsJob, videoHls, hlsToken, cloudbase, miniViewer] = await Promise.all([
+  const [packageJson, client, uploadRoute, multipartRoute, urlRoute, hlsRoute, transcodeRoute, backfillRoute, hlsJob, videoHls, hlsToken, cloudbase, miniViewer] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
@@ -77,6 +77,7 @@ test("supports non-blocking HLS transcode for weak-network video playback", asyn
     readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/hls/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/hls/transcode/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/hls/backfill/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hls-transcode-job.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/video-hls.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hls-token.ts", import.meta.url), "utf8"),
@@ -88,6 +89,7 @@ test("supports non-blocking HLS transcode for weak-network video playback", asyn
   assert.match(cloudbase, /hlsRenditions/);
   assert.match(cloudbase, /updatePhotoHlsReady/);
   assert.match(cloudbase, /rendition\.segments\.map/);
+  assert.match(cloudbase, /listActiveVideosForHlsBackfill/);
   assert.match(uploadRoute, /startPhotoHlsTranscode\(photo\.id\)/);
   assert.match(multipartRoute, /startPhotoHlsTranscode\(photo\.id\)/);
   assert.match(urlRoute, /hlsUrl/);
@@ -97,6 +99,10 @@ test("supports non-blocking HLS transcode for weak-network video playback", asyn
   assert.match(hlsRoute, /verifyHlsPlaybackToken/);
   assert.match(transcodeRoute, /transcodePhotoToHls/);
   assert.match(transcodeRoute, /video\.hls\.transcode/);
+  assert.match(backfillRoute, /isSuperAdmin/);
+  assert.match(backfillRoute, /Math\.min\(number, 5\)/);
+  assert.match(backfillRoute, /video\.hls\.backfill/);
+  assert.match(backfillRoute, /startPhotoHlsTranscode\(video\.id\)/);
   assert.match(hlsJob, /transcodeVideoToHls/);
   assert.match(hlsJob, /updatePhotoHlsProcessing/);
   assert.match(videoHls, /ffprobe/);

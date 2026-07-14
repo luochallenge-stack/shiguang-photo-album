@@ -408,6 +408,30 @@ export async function listActivePhotosForDedup(max = 1000): Promise<AlbumPhoto[]
   return photos.filter((photo) => photo.mimeType.startsWith("image/"));
 }
 
+export async function listActiveVideosForHlsBackfill(max = 5, includeFailed = false): Promise<AlbumPhoto[]> {
+  const videos: AlbumPhoto[] = [];
+  const limit = Math.max(1, Math.min(20, Math.floor(max)));
+  for (let offset = 0; videos.length < limit; offset += 100) {
+    const result = await database()
+      .collection(COLLECTIONS.photos)
+      .where(activePhotoFilter())
+      .orderBy("createdAt", "desc")
+      .skip(offset)
+      .limit(100)
+      .get();
+    const page = rows<AlbumPhoto>(result);
+    if (!page.length) break;
+    for (const photo of page) {
+      const status = photo.hlsStatus || "";
+      const needsBackfill = !status || status === "pending" || (includeFailed && status === "failed");
+      if (photo.mimeType.startsWith("video/") && needsBackfill) videos.push(photo);
+      if (videos.length >= limit) break;
+    }
+    if (page.length < 100) break;
+  }
+  return videos;
+}
+
 export async function updatePhotoContentHash(id: string, contentHash: string): Promise<void> {
   await database().collection(COLLECTIONS.photos).doc(id).update({ contentHash });
 }

@@ -359,6 +359,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - `lib/video-hls.ts` 使用 ffmpeg/ffprobe 转出 360p/720p HLS 分片；`album_photos` 记录 `hlsStatus / hlsRenditions / hlsError`。
 - `/api/photos/url` 在 HLS ready 时返回带临时签名的 `hlsUrl`，否则只返回原视频地址。
 - `/api/photos/hls` 动态生成 master/variant m3u8，并把每个 `.ts` 分片行替换为 CloudBase 临时 URL；不要把永久 m3u8 文件直接暴露给小程序，因为分片 URL 需要按需签发。
+- 历史视频不需要改原文件格式，也不要删除原视频；超级管理员可以调用 `/api/photos/hls/backfill` 给未转码的视频补跑 HLS，原文件继续作为回退源。
 - Web 端用 `hls.js` 播放 m3u8，失败时回退原视频；小程序端仍使用原生 `<video>`，优先传入 `hlsUrl || url`。
 - `Video.js / Plyr` 主要改善播放器控件、皮肤和 API；当前真正改善弱网体验的是 HLS 多码率分片。
 
