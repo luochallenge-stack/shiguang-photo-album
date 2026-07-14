@@ -69,7 +69,7 @@ test("builds the authenticated photo and video album surface", async () => {
 });
 
 test("supports non-blocking HLS transcode for weak-network video playback", async () => {
-  const [packageJson, client, uploadRoute, multipartRoute, urlRoute, hlsRoute, transcodeRoute, backfillRoute, hlsJob, videoHls, hlsToken, cloudbase, miniViewer] = await Promise.all([
+  const [packageJson, client, uploadRoute, multipartRoute, urlRoute, hlsRoute, transcodeRoute, backfillRoute, browserBackfillRoute, hlsBackfill, hlsJob, videoHls, hlsToken, cloudbase, miniViewer] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
@@ -78,6 +78,8 @@ test("supports non-blocking HLS transcode for weak-network video playback", asyn
     readFile(new URL("../app/api/photos/hls/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/hls/transcode/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/hls/backfill/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/hls-backfill/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hls-backfill.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hls-transcode-job.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/video-hls.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/hls-token.ts", import.meta.url), "utf8"),
@@ -100,9 +102,12 @@ test("supports non-blocking HLS transcode for weak-network video playback", asyn
   assert.match(transcodeRoute, /transcodePhotoToHls/);
   assert.match(transcodeRoute, /video\.hls\.transcode/);
   assert.match(backfillRoute, /isSuperAdmin/);
-  assert.match(backfillRoute, /Math\.min\(number, 5\)/);
-  assert.match(backfillRoute, /video\.hls\.backfill/);
-  assert.match(backfillRoute, /startPhotoHlsTranscode\(video\.id\)/);
+  assert.match(backfillRoute, /runHlsBackfill/);
+  assert.match(browserBackfillRoute, /isSuperAdmin/);
+  assert.match(browserBackfillRoute, /runHlsBackfill/);
+  assert.match(hlsBackfill, /Math\.min\(number, 5\)/);
+  assert.match(hlsBackfill, /video\.hls\.backfill/);
+  assert.match(hlsBackfill, /startPhotoHlsTranscode\(video\.id\)/);
   assert.match(hlsJob, /transcodeVideoToHls/);
   assert.match(hlsJob, /updatePhotoHlsProcessing/);
   assert.match(videoHls, /ffprobe/);
