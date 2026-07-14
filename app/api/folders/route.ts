@@ -1,9 +1,11 @@
 import {
+  countActivePhotosInFolder,
   countPhotosInFolder,
   createFolderRecord,
   deleteFolderRecord,
   findFolder,
   listUsers,
+  recycleAllActivePhotosInFolder,
   updateFolderVisibility,
   type FolderVisibilityType,
 } from "../../../lib/cloudbase";
@@ -144,21 +146,39 @@ export async function DELETE(request: Request) {
     if (!folder || !canUserReadFolder(folder, user)) {
       return Response.json({ error: "文件夹不存在" }, { status: 404 });
     }
-    const photoCount = await countPhotosInFolder(folder.slug);
-    if (photoCount > 0) {
+    const activePhotoCount = await countActivePhotosInFolder(folder.slug);
+    const confirmed = new URL(request.url).searchParams.get("confirm") === "1";
+    if (activePhotoCount > 0 && !confirmed) {
       return Response.json({
-        error: `文件夹中仍有 ${photoCount} 项影像（包含回收站），请先移动或永久删除后再删除文件夹`,
+        error: `文件夹中仍有 ${activePhotoCount} 项影像，需要二次确认后才能删除`,
+        requiresConfirmation: true,
+        activePhotoCount,
       }, { status: 409 });
     }
-    await deleteFolderRecord(folder.id, folder.slug);
+    const deletedAt = new Date().toISOString();
+    const purgeAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const recycledPhotoCount = activePhotoCount > 0
+      ? await recycleAllActivePhotosInFolder(folder.slug, deletedAt, purgeAt, user.displayName)
+      : 0;
+    if (recycledPhotoCount > 0) {
+      await recordAudit(request, user, {
+        action: "media.recycle.folder",
+        resourceType: "folder",
+        resourceId: folder.id,
+        resourceName: folder.name,
+        metadata: { folderSlug: folder.slug, recycledPhotoCount, purgeAt },
+      });
+    }
+    const totalPhotoCount = await countPhotosInFolder(folder.slug);
+    await deleteFolderRecord(folder.id, folder.slug, totalPhotoCount > 0);
     await recordAudit(request, user, {
       action: "folder.delete",
       resourceType: "folder",
       resourceId: folder.id,
       resourceName: folder.name,
-      metadata: { folderSlug: folder.slug },
+      metadata: { folderSlug: folder.slug, recycledPhotoCount: totalPhotoCount, cascadedPhotoCount: recycledPhotoCount },
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, recycledPhotoCount, purgeAt: totalPhotoCount > 0 ? purgeAt : "" });
   } catch (error) {
     const message = error instanceof Error ? error.message : "删除文件夹失败";
     return Response.json({ error: message }, { status: 500 });

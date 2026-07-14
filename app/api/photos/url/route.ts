@@ -1,7 +1,8 @@
 import { canDeleteMedia, canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
-import { findFolder, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
+import { findFolder, findFolderIncludingDeleted, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
+import { orientedImageUrl } from "../../../../lib/image-url";
 import { isVideoMimeType } from "../../../../lib/media";
 
 export async function GET(request: Request) {
@@ -13,7 +14,9 @@ export async function GET(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
-    const folder = await findFolder(photo.folderSlug);
+    const folder = photo.deletedAt
+      ? await findFolderIncludingDeleted(photo.folderSlug)
+      : await findFolder(photo.folderSlug);
     if (!folder || !canUserReadFolder(folder, user)) {
       return Response.json({ error: "文件不存在" }, { status: 404 });
     }
@@ -28,7 +31,12 @@ export async function GET(request: Request) {
       resourceName: photo.name,
       metadata: { folderSlug: photo.folderSlug },
     });
-    return Response.json({ url: url || photo.url, mimeType: photo.mimeType }, {
+    const resolvedUrl = url || photo.url;
+    return Response.json({
+      url: resolvedUrl,
+      displayUrl: video ? resolvedUrl : orientedImageUrl(resolvedUrl),
+      mimeType: photo.mimeType,
+    }, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

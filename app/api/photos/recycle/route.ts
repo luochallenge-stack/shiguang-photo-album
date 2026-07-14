@@ -1,9 +1,11 @@
 import {
   deletePhotoFiles,
   deletePhotoRecord,
-  findFolder,
+  findFolderIncludingDeleted,
   findPhoto,
   mediaFileIds,
+  removeDeletedFolderIfEmpty,
+  restoreDeletedFolderRecord,
   restorePhotoRecord,
   type AlbumPhoto,
   type AlbumUser,
@@ -31,7 +33,7 @@ async function recycledPhotos(ids: string[]): Promise<AlbumPhoto[] | null> {
 
 async function photosAreVisible(photos: AlbumPhoto[], user: AlbumUser): Promise<boolean> {
   const folders = await Promise.all(
-    [...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolder(slug)),
+    [...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolderIncludingDeleted(slug)),
   );
   return folders.every((folder) => Boolean(folder && canUserReadFolder(folder, user)));
 }
@@ -58,9 +60,14 @@ export async function PATCH(request: Request) {
     if (!(await photosAreVisible(photos, user))) {
       return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
     }
-    const folders = await Promise.all([...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolder(slug)));
+    const folders = await Promise.all(
+      [...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolderIncludingDeleted(slug)),
+    );
     if (folders.some((folder) => !folder)) return Response.json({ error: "原文件夹不存在，暂时无法恢复" }, { status: 409 });
 
+    await Promise.all(folders.map((folder) => (
+      folder?.deletedAt ? restoreDeletedFolderRecord(folder.id) : Promise.resolve()
+    )));
     await Promise.all(photos.map((photo) => restorePhotoRecord(photo.id, user.displayName)));
     await Promise.all(photos.map((photo) => recordAudit(request, user, {
       action: "media.restore.batch",
@@ -93,6 +100,7 @@ export async function DELETE(request: Request) {
 
     await deletePhotoFiles(mediaFileIds(photos));
     await Promise.all(photos.map((photo) => deletePhotoRecord(photo.id)));
+    await Promise.all([...new Set(photos.map((photo) => photo.folderSlug))].map(removeDeletedFolderIfEmpty));
     await Promise.all(photos.map((photo) => recordAudit(request, user, {
       action: "media.purge.batch",
       resourceType: "media",

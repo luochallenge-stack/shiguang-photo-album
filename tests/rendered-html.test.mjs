@@ -196,8 +196,10 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /\/api\/folders\/name/);
   assert.match(library, /openMediaActions/);
   assert.match(library, /shareOriginalImage/);
+  assert.match(library, /shareOriginalFile/);
   assert.match(library, /wx\.downloadFile/);
   assert.match(library, /wx\.showShareImageMenu/);
+  assert.match(library, /wx\.shareFileMessage/);
   assert.match(library, /media\.share/);
   assert.match(library, /method: "PATCH"/);
   assert.match(libraryTemplate, /folder-manage-button/);
@@ -265,11 +267,23 @@ test("enforces identity-based folder visibility across backend entry points", as
   assert.match(folderRoute, /canManageFolderVisibility/);
   assert.match(folderRoute, /folder\.visibility\.update/);
   assert.match(folderRoute, /export async function DELETE/);
+  assert.match(folderRoute, /countActivePhotosInFolder/);
   assert.match(folderRoute, /countPhotosInFolder/);
+  assert.match(folderRoute, /recycleAllActivePhotosInFolder/);
+  assert.match(folderRoute, /requiresConfirmation/);
+  assert.match(folderRoute, /media\.recycle\.folder/);
   assert.match(folderRoute, /folder\.delete/);
   assert.match(cloudbase, /deleteFolderRecord/);
+  assert.match(cloudbase, /findFolderIncludingDeleted/);
+  assert.match(cloudbase, /restoreDeletedFolderRecord/);
+  assert.match(libraryRoute, /previewUrl/);
+  assert.match(libraryRoute, /imageThumbnailUrl/);
+  assert.match(urlRoute, /displayUrl/);
+  assert.match(urlRoute, /orientedImageUrl/);
   assert.match(client, /deleteFolder/);
+  assert.match(client, /folderDeleteStep/);
   assert.match(miniLibrary, /confirmDeleteFolder/);
+  assert.match(miniLibrary, /再次确认删除/);
   assert.match(libraryRoute, /folders: visibleFolderRows\.map/);
   assert.match(libraryRoute, /countRecycledPhotos\(hiddenFolderSlugs\)/);
   for (const route of [photoRoute, batchRoute, recycleRoute, urlRoute, auditRoute]) {

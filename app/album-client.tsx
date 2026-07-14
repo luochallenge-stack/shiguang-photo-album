@@ -60,6 +60,7 @@ type PhotoItem = {
   objectKey: string;
   name: string;
   url: string;
+  previewUrl?: string;
   size: number;
   mimeType: string;
   width: number | null;
@@ -435,6 +436,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [editingFolderName, setEditingFolderName] = useState("");
   const [savingFolderName, setSavingFolderName] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<FolderItem | null>(null);
+  const [folderDeleteStep, setFolderDeleteStep] = useState<1 | 2>(1);
   const [savingFolderDelete, setSavingFolderDelete] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -786,12 +788,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     setError("");
     try {
       await readJson<{ ok: boolean }>(
-        await fetch(`/api/folders?folder=${encodeURIComponent(deletingFolder.slug)}`, {
+        await fetch(`/api/folders?folder=${encodeURIComponent(deletingFolder.slug)}${deletingFolder.photoCount > 0 ? "&confirm=1" : ""}`, {
           method: "DELETE",
           headers: adminHeaders(),
         }),
       );
       setDeletingFolder(null);
+      setFolderDeleteStep(1);
       setSelectedFolder("");
       setPhotos([]);
       const url = new URL(window.location.href);
@@ -802,6 +805,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "删除文件夹失败");
       setDeletingFolder(null);
+      setFolderDeleteStep(1);
     } finally {
       setSavingFolderDelete(false);
     }
@@ -1157,7 +1161,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               </button>
             )}
             {selectedFolder && activeFolder && canManageFolders && (
-              <button className="secondary-button" onClick={() => setDeletingFolder(activeFolder)} title="删除空文件夹">
+              <button className="secondary-button" onClick={() => { setDeletingFolder(activeFolder); setFolderDeleteStep(1); }} title="删除文件夹">
                 <Trash2 size={17} />
                 删除
               </button>
@@ -1293,7 +1297,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                   >
                     {isVideoMimeType(photo.mimeType)
                       ? <video src={photo.url} muted playsInline preload="metadata" aria-label={photo.name} />
-                      : <img src={photo.url} alt={photo.name} loading="lazy" />}
+                      : <img src={photo.previewUrl || photo.url} alt={photo.name} loading="lazy" />}
                     {isVideoMimeType(photo.mimeType) && <span className="play-badge"><Play size={19} fill="currentColor" /></span>}
                     {editMode
                       ? <span className="selection-mark">{selectedPhotoSet.has(photo.id) && <Check size={17} strokeWidth={3} />}</span>
@@ -1593,21 +1597,26 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
       )}
 
       {deletingFolder && (
-        <div className="modal-backdrop" onMouseDown={() => !savingFolderDelete && setDeletingFolder(null)}>
+        <div className="modal-backdrop" onMouseDown={() => { if (!savingFolderDelete) { setDeletingFolder(null); setFolderDeleteStep(1); } }}>
           <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="delete-folder-title">
             <div className="dialog-heading">
-              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-folder-title">删除文件夹</h2></div>
-              <button className="icon-button" disabled={savingFolderDelete} onClick={() => setDeletingFolder(null)} aria-label="关闭"><X size={18} /></button>
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-folder-title">{folderDeleteStep === 2 ? "再次确认删除" : "删除文件夹"}</h2></div>
+              <button className="icon-button" disabled={savingFolderDelete} onClick={() => { setDeletingFolder(null); setFolderDeleteStep(1); }} aria-label="关闭"><X size={18} /></button>
             </div>
             <p className="dialog-message">
-              {deletingFolder.photoCount > 0
-                ? `「${deletingFolder.name}」中还有 ${deletingFolder.photoCount} 项影像，请先移动影像；回收站内容也需要恢复后移动或永久删除。`
-                : `确定删除空文件夹「${deletingFolder.name}」吗？文件夹删除后无法恢复。`}
+              {deletingFolder.photoCount > 0 && folderDeleteStep === 1
+                ? `「${deletingFolder.name}」中还有 ${deletingFolder.photoCount} 项正常影像。继续后还会进行一次确认。`
+                : deletingFolder.photoCount > 0
+                  ? `确认将 ${deletingFolder.photoCount} 项影像全部移入回收站并删除「${deletingFolder.name}」吗？影像保留 7 天。`
+                : `确定删除文件夹「${deletingFolder.name}」吗？回收站影像仍保留 7 天，恢复影像时会一并恢复文件夹。`}
             </p>
             <div className="dialog-actions">
-              <button className="secondary-button" disabled={savingFolderDelete} onClick={() => setDeletingFolder(null)}>取消</button>
-              <button className="danger-button" disabled={savingFolderDelete || deletingFolder.photoCount > 0} onClick={() => void deleteFolder()}>
-                {savingFolderDelete ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} 删除文件夹
+              <button className="secondary-button" disabled={savingFolderDelete} onClick={() => { setDeletingFolder(null); setFolderDeleteStep(1); }}>取消</button>
+              <button className="danger-button" disabled={savingFolderDelete} onClick={() => {
+                if (deletingFolder.photoCount > 0 && folderDeleteStep === 1) setFolderDeleteStep(2);
+                else void deleteFolder();
+              }}>
+                {savingFolderDelete ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} {deletingFolder.photoCount > 0 && folderDeleteStep === 1 ? "继续" : "确认删除"}
               </button>
             </div>
           </section>
@@ -1692,7 +1701,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           <div className="preview-canvas" onClick={() => setPreview(null)}>
             {isVideoMimeType(preview.mimeType)
               ? <video src={preview.url} controls autoPlay playsInline onClick={(event) => event.stopPropagation()} />
-              : <img src={preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />}
+              : <img src={preview.previewUrl || preview.url} alt={preview.name} onClick={(event) => event.stopPropagation()} />}
           </div>
         </div>
       )}

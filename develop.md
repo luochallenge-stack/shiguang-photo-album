@@ -205,9 +205,9 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 
 - `resolvePhotoUrls` 每批最多处理 50 个 `fileId`，默认临时地址有效期 10 分钟。
 - `/api/library` 为列表中当前页媒体生成临时地址。
-- 小程序图片列表使用 CloudBase `imageMogr2` 生成 640x640 WebP 缩略图。
+- 双端图片预览使用 CloudBase `imageMogr2/auto-orient` 按 EXIF 自动回正；小程序列表在此基础上生成 640x640 WebP 缩略图。
 - 小程序打开图片或视频时调用 `GET /api/photos/url?id=...` 刷新地址。
-- 小程序“转发原图”先下载刷新后的原始文件到本地临时路径，再调用 `wx.showShareImageMenu`，不要转发列表缩略图。
+- 小程序“发送给朋友（原文件）”先把原始文件下载到带正确扩展名的本地路径，再调用 `wx.shareFileMessage`；“图片分享与保存”下载自动回正后的图片并调用 `wx.showShareImageMenu`，不要转发列表缩略图。
 - 图片刷新地址有效期 10 分钟，视频刷新地址有效期 2 小时。
 - `GET /api/photos/url` 必须先检查所属文件夹的读取权限，并返回 `cache-control: no-store`。
 - 中文文件夹或文件名可能出现在临时 URL 中，小程序赋给 `<video>` 或预览组件前必须保留 `encodeURI(url)`。
@@ -228,7 +228,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `PATCH /api/folders` | manageFolders 创建者/超级管理员 | 修改文件夹可见范围 |
 | `PATCH /api/folders/order` | manageFolders | 保存当前用户可见目录顺序，不改变隐藏目录相对位置 |
 | `PATCH /api/folders/name` | manageFolders | 重命名文件夹，保持 slug 不变 |
-| `DELETE /api/folders?folder={slug}` | manageFolders | 删除空文件夹并清理上传令牌；仍有正常或回收站影像时返回 409 |
+| `DELETE /api/folders?folder={slug}&confirm=1` | manageFolders | 删除文件夹；有正常影像时必须二次确认并携带 `confirm=1`，服务端把全部正常影像移入回收站后保留隐藏墓碑，恢复影像会恢复文件夹 |
 | `POST /api/folders/share` | manageFolders | 生成或轮换上传链接令牌 |
 | `GET /api/users/options` | manageFolders/可管理可见范围 | 返回有效用户，供可见范围选择器使用 |
 | `POST /api/photos/upload` | upload/上传令牌 | 生成 Web 直传信息和票据 |

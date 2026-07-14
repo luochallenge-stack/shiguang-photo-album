@@ -17,6 +17,7 @@ const PERMISSION_OPTIONS = [
 ];
 let libraryRequestId = 0;
 let pendingUploadFiles = [];
+let lastShareFilePath = "";
 const generatingCoverIds = new Set();
 
 function formatSize(value) {
@@ -33,6 +34,17 @@ function formatDate(value) {
 
 function mediaUrl(value) {
   return value ? encodeURI(value) : "";
+}
+
+function shareFileName(item) {
+  const mimeType = String(item && item.mimeType || "").toLowerCase();
+  const fallbackExtension = mimeType.includes("png") ? "png" : mimeType.includes("gif") ? "gif" : "jpg";
+  let name = String(item && item.name || `原图.${fallbackExtension}`)
+    .replace(/[\\/:*?"<>|\r\n]/g, "-")
+    .trim()
+    .slice(0, 100);
+  if (!/\.[a-z0-9]{2,5}$/i.test(name)) name = `${name || "原图"}.${fallbackExtension}`;
+  return name;
 }
 
 function operationLabel(photo) {
@@ -269,7 +281,8 @@ Page({
           return {
             ...photo,
             url: mediaUrl(photo.url),
-            thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video ? "" : photo.url)),
+            previewUrl: mediaUrl(photo.previewUrl || photo.url),
+            thumbnailUrl: mediaUrl(photo.thumbnailUrl || (video ? "" : photo.previewUrl || photo.url)),
             video,
             sizeLabel: formatSize(photo.size || 0),
             dateLabel: formatDate(photo.createdAt),
@@ -527,7 +540,7 @@ Page({
       handlers.push(() => this.openFolderVisibility(folder));
     }
     if (this.data.user.canManageFolders) {
-      actions.push("删除空文件夹");
+      actions.push("删除文件夹");
       handlers.push(() => this.confirmDeleteFolder(folder));
     }
     if (!actions.length) return;
@@ -541,36 +554,52 @@ Page({
 
   confirmDeleteFolder(folder) {
     if (!folder || !this.data.user.canManageFolders) return;
-    if (Number(folder.photoCount) > 0) {
-      wx.showToast({ title: "请先移动文件夹中的影像", icon: "none" });
-      return;
-    }
+    const photoCount = Number(folder.photoCount) || 0;
     wx.showModal({
       title: "删除文件夹",
-      content: `确定删除空文件夹“${folder.name}”吗？回收站中也不能保留该文件夹的影像。`,
-      confirmText: "删除",
+      content: photoCount > 0
+        ? `“${folder.name}”中还有 ${photoCount} 项正常影像，继续后需要再次确认。`
+        : `确定删除文件夹“${folder.name}”吗？回收站中的影像仍保留 7 天，恢复影像时会一并恢复文件夹。`,
+      confirmText: photoCount > 0 ? "继续" : "删除",
       confirmColor: "#b33a34",
-      success: async ({ confirm }) => {
+      success: ({ confirm }) => {
         if (!confirm) return;
-        wx.showLoading({ title: "正在删除", mask: true });
-        try {
-          await api.request(`/api/folders?folder=${encodeURIComponent(folder.slug)}`, { method: "DELETE" });
-          const nextFolder = this.data.selectedFolder === folder.slug ? "" : this.data.selectedFolder;
-          this.setData({ folderMenuOpen: false });
-          wx.showToast({ title: "文件夹已删除", icon: "success" });
-          this.loadLibrary(nextFolder, true, false, false);
-        } catch (error) {
-          if (error.statusCode === 401) {
-            api.clearSession();
-            wx.reLaunch({ url: "/pages/login/login" });
-            return;
-          }
-          wx.showToast({ title: error.message || "删除文件夹失败", icon: "none", duration: 3000 });
-        } finally {
-          wx.hideLoading();
+        if (photoCount > 0) {
+          wx.showModal({
+            title: "再次确认删除",
+            content: `确认将 ${photoCount} 项影像全部移入回收站并删除“${folder.name}”吗？影像保留 7 天。`,
+            confirmText: "确认删除",
+            confirmColor: "#b33a34",
+            success: ({ confirm: confirmedAgain }) => {
+              if (confirmedAgain) this.deleteFolder(folder, true);
+            },
+          });
+          return;
         }
+        this.deleteFolder(folder, false);
       },
     });
+  },
+
+  async deleteFolder(folder, confirmed) {
+    wx.showLoading({ title: "正在删除", mask: true });
+    try {
+      const suffix = confirmed ? "&confirm=1" : "";
+      await api.request(`/api/folders?folder=${encodeURIComponent(folder.slug)}${suffix}`, { method: "DELETE" });
+      const nextFolder = this.data.selectedFolder === folder.slug ? "" : this.data.selectedFolder;
+      this.setData({ folderMenuOpen: false });
+      wx.showToast({ title: "文件夹已删除", icon: "success" });
+      this.loadLibrary(nextFolder, true, false, false);
+    } catch (error) {
+      if (error.statusCode === 401) {
+        api.clearSession();
+        wx.reLaunch({ url: "/pages/login/login" });
+        return;
+      }
+      wx.showToast({ title: error.message || "删除文件夹失败", icon: "none", duration: 3000 });
+    } finally {
+      wx.hideLoading();
+    }
   },
 
   openRename(kind, target) {
@@ -743,7 +772,7 @@ Page({
   thumbnailError(event) {
     const id = event.currentTarget.dataset.id;
     const photos = this.data.photos.map((photo) => photo.id === id
-      ? { ...photo, thumbnailUrl: photo.video ? "" : photo.url }
+      ? { ...photo, thumbnailUrl: photo.video ? "" : photo.previewUrl || photo.url }
       : photo);
     this.setData({ photos });
   },
@@ -763,12 +792,12 @@ Page({
     }
     wx.showLoading({ title: "正在打开" });
     api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`)
-      .then(({ url }) => {
-        const current = mediaUrl(url || item.url);
+      .then((result) => {
+        const current = mediaUrl(result.displayUrl || result.url || item.previewUrl || item.url);
         const urls = this.data.photos
           .filter((photo) => !photo.video)
-          .map((photo) => photo.id === item.id ? current : photo.url);
-    wx.previewImage({ current, urls });
+          .map((photo) => photo.id === item.id ? current : photo.previewUrl || photo.url);
+        wx.previewImage({ current, urls });
       })
       .catch((error) => wx.showToast({ title: error.message || "打开图片失败", icon: "none" }))
       .finally(() => wx.hideLoading());
@@ -782,7 +811,9 @@ Page({
     const actions = [];
     const handlers = [];
     if (!item.video) {
-      actions.push("转发原图");
+      actions.push("发送给朋友（原文件）");
+      handlers.push(() => this.shareOriginalFile(item));
+      actions.push("图片分享与保存");
       handlers.push(() => this.shareOriginalImage(item));
     }
     if (this.data.user.canEdit) {
@@ -798,45 +829,88 @@ Page({
     });
   },
 
-  async shareOriginalImage(item) {
+  async downloadShareImage(item, display = false) {
+    const result = await api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`);
+    const url = mediaUrl(display ? result.displayUrl || result.url : result.url);
+    if (!url) throw new Error("原图地址不可用");
+    const filename = shareFileName(item);
+    const filePath = `${wx.env.USER_DATA_PATH}/${Date.now()}-${filename}`;
+    if (lastShareFilePath) {
+      try { wx.getFileSystemManager().unlinkSync(lastShareFilePath); } catch (error) { void error; }
+    }
+    const downloadedPath = await new Promise((resolve, reject) => {
+      wx.downloadFile({
+        url,
+        filePath,
+        timeout: 120000,
+        success: (response) => {
+          if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
+            resolve(response.tempFilePath);
+            return;
+          }
+          reject(new Error(`下载原图失败 (${response.statusCode})`));
+        },
+        fail: (error) => reject(new Error(error.errMsg || "下载原图失败")),
+      });
+    });
+    lastShareFilePath = downloadedPath;
+    return { filePath: downloadedPath, filename };
+  },
+
+  recordMediaShare(item) {
+    api.request("/api/audit", {
+      method: "POST",
+      data: {
+        action: "media.share",
+        resourceId: item.id,
+        resourceName: item.name,
+        folderSlug: item.folderSlug,
+      },
+    }).catch(() => {});
+  },
+
+  async shareOriginalFile(item) {
     if (!item || item.video) return;
+    if (typeof wx.shareFileMessage !== "function") {
+      this.shareOriginalImage(item);
+      return;
+    }
     wx.showLoading({ title: "正在准备原图", mask: true });
     try {
-      const result = await api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`);
-      const originalUrl = mediaUrl(result.url || item.url);
-      if (!originalUrl) throw new Error("原图地址不可用");
-      const tempFilePath = await new Promise((resolve, reject) => {
-        wx.downloadFile({
-          url: originalUrl,
-          timeout: 120000,
-          success: (response) => {
-            if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
-              resolve(response.tempFilePath);
-              return;
-            }
-            reject(new Error(`下载原图失败 (${response.statusCode})`));
-          },
-          fail: (error) => reject(new Error(error.errMsg || "下载原图失败")),
-        });
-      });
-      if (typeof wx.showShareImageMenu !== "function") throw new Error("当前微信版本不支持原图转发");
+      const local = await this.downloadShareImage(item, false);
       wx.hideLoading();
       await new Promise((resolve, reject) => {
-        wx.showShareImageMenu({
-          path: tempFilePath,
+        wx.shareFileMessage({
+          filePath: local.filePath,
+          fileName: local.filename,
           success: resolve,
           fail: reject,
         });
       });
-      api.request("/api/audit", {
-        method: "POST",
-        data: {
-          action: "media.share",
-          resourceId: item.id,
-          resourceName: item.name,
-          folderSlug: item.folderSlug,
-        },
-      }).catch(() => {});
+      this.recordMediaShare(item);
+    } catch (error) {
+      const message = error && error.errMsg || error && error.message || "发送原图失败";
+      if (!/cancel/i.test(message)) wx.showToast({ title: message, icon: "none", duration: 3000 });
+    } finally {
+      wx.hideLoading();
+    }
+  },
+
+  async shareOriginalImage(item) {
+    if (!item || item.video) return;
+    wx.showLoading({ title: "正在准备原图", mask: true });
+    try {
+      const { filePath } = await this.downloadShareImage(item, true);
+      if (typeof wx.showShareImageMenu !== "function") throw new Error("当前微信版本不支持原图转发");
+      wx.hideLoading();
+      await new Promise((resolve, reject) => {
+        wx.showShareImageMenu({
+          path: filePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+      this.recordMediaShare(item);
     } catch (error) {
       const message = error && error.errMsg || error && error.message || "转发原图失败";
       if (!/cancel/i.test(message)) wx.showToast({ title: message, icon: "none", duration: 3000 });

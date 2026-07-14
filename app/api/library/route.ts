@@ -17,14 +17,14 @@ import {
 } from "../../../lib/access";
 import { currentUser, forbidden, isMiniProgramRequest, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
+import { imageThumbnailUrl, orientedImageUrl } from "../../../lib/image-url";
 
 const MINI_PROGRAM_PAGE_SIZE = 24;
 const WEB_PAGE_SIZE = 48;
 
 function thumbnailUrl(url: string, mimeType: string): string {
   if (!mimeType.startsWith("image/") || !url.startsWith("http")) return "";
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}imageMogr2/thumbnail/640x640/format/webp/anima-format/webp/rquality/76`;
+  return imageThumbnailUrl(url);
 }
 
 export async function GET(request: Request) {
@@ -107,6 +107,7 @@ export async function GET(request: Request) {
         return {
           ...photo,
           url: resolvedUrl,
+          previewUrl: photo.mimeType.startsWith("image/") ? orientedImageUrl(resolvedUrl) : resolvedUrl,
           coverUrl,
           thumbnailUrl: coverUrl
             ? coverUrl

@@ -10,6 +10,7 @@ export type AlbumFolder = {
   visibleUserIds?: string[];
   passwordHash?: string;
   sortOrder?: number;
+  deletedAt?: string;
 };
 
 export type FolderVisibilityType = "all" | "admins" | "specific";
@@ -192,7 +193,7 @@ async function queryPhotoPage(
 
 export async function listFolders(): Promise<AlbumFolder[]> {
   const result = await database().collection(COLLECTIONS.folders).orderBy("createdAt", "desc").limit(100).get();
-  return rows<AlbumFolder>(result).sort((left, right) => {
+  return rows<AlbumFolder>(result).filter((folder) => !folder.deletedAt).sort((left, right) => {
     const leftOrder = Number.isFinite(left.sortOrder) ? Number(left.sortOrder) : null;
     const rightOrder = Number.isFinite(right.sortOrder) ? Number(right.sortOrder) : null;
     if (leftOrder !== null && rightOrder !== null && leftOrder !== rightOrder) return leftOrder - rightOrder;
@@ -203,6 +204,11 @@ export async function listFolders(): Promise<AlbumFolder[]> {
 }
 
 export async function findFolder(slug: string): Promise<AlbumFolder | null> {
+  const folder = await findFolderIncludingDeleted(slug);
+  return folder && !folder.deletedAt ? folder : null;
+}
+
+export async function findFolderIncludingDeleted(slug: string): Promise<AlbumFolder | null> {
   const result = await database().collection(COLLECTIONS.folders).where({ slug }).limit(1).get();
   return rows<AlbumFolder>(result)[0] || null;
 }
@@ -235,14 +241,33 @@ export async function updateFolderSortOrders(folderIds: string[]): Promise<void>
   )));
 }
 
+export async function countActivePhotosInFolder(folderSlug: string): Promise<number> {
+  const result = await database().collection(COLLECTIONS.photos).where(activePhotoFilter(folderSlug)).count();
+  return Math.max(0, Number(result.total) || 0);
+}
+
 export async function countPhotosInFolder(folderSlug: string): Promise<number> {
   const result = await database().collection(COLLECTIONS.photos).where({ folderSlug }).count();
   return Math.max(0, Number(result.total) || 0);
 }
 
-export async function deleteFolderRecord(id: string, folderSlug: string): Promise<void> {
+export async function deleteFolderRecord(id: string, folderSlug: string, keepRecycleTombstone = false): Promise<void> {
   await database().collection(COLLECTIONS.uploadTokens).doc(folderSlug).remove();
-  await database().collection(COLLECTIONS.folders).doc(id).remove();
+  if (keepRecycleTombstone) {
+    await database().collection(COLLECTIONS.folders).doc(id).update({ deletedAt: new Date().toISOString() });
+  } else {
+    await database().collection(COLLECTIONS.folders).doc(id).remove();
+  }
+}
+
+export async function restoreDeletedFolderRecord(id: string): Promise<void> {
+  await database().collection(COLLECTIONS.folders).doc(id).update({ deletedAt: "" });
+}
+
+export async function removeDeletedFolderIfEmpty(folderSlug: string): Promise<void> {
+  const folder = await findFolderIncludingDeleted(folderSlug);
+  if (!folder?.deletedAt || await countPhotosInFolder(folderSlug)) return;
+  await database().collection(COLLECTIONS.folders).doc(folder.id).remove();
 }
 
 export async function listPhotoPage(options: {
@@ -320,6 +345,26 @@ export async function recyclePhotoRecord(id: string, deletedAt: string, purgeAt:
     purgeAt,
     ...operationFields("recycle", actorName, deletedAt),
   });
+}
+
+export async function recycleAllActivePhotosInFolder(
+  folderSlug: string,
+  deletedAt: string,
+  purgeAt: string,
+  actorName: string,
+): Promise<number> {
+  let recycledCount = 0;
+  while (true) {
+    const result = await database()
+      .collection(COLLECTIONS.photos)
+      .where(activePhotoFilter(folderSlug))
+      .limit(100)
+      .get();
+    const photos = rows<AlbumPhoto>(result);
+    if (!photos.length) return recycledCount;
+    await Promise.all(photos.map((photo) => recyclePhotoRecord(photo.id, deletedAt, purgeAt, actorName)));
+    recycledCount += photos.length;
+  }
 }
 
 export async function restorePhotoRecord(id: string, actorName: string): Promise<void> {
@@ -466,6 +511,7 @@ export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {
   if (!expired.length) return 0;
   await deletePhotoFiles(mediaFileIds(expired));
   await Promise.all(expired.map((photo) => deletePhotoRecord(photo.id)));
+  await Promise.all([...new Set(expired.map((photo) => photo.folderSlug))].map(removeDeletedFolderIfEmpty));
   return expired.length;
 }
 
