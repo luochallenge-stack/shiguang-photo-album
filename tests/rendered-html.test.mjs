@@ -33,6 +33,9 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(auth, /status: "active"/);
   assert.doesNotMatch(auth + login, /open\.weixin|graph\.qq|微信登录|QQ 登录/);
   assert.match(client, /api\/folders\/share/);
+  assert.match(client, /api\/folders\/name/);
+  assert.match(client, /重命名文件夹/);
+  assert.match(client, /canManageFolders &&/);
   assert.match(client, /重命名\{mediaLabel\(editingPhoto\)\}/);
   assert.match(client, /移入回收站/);
   assert.match(client, /VisibilityFields/);

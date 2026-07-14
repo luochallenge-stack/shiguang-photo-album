@@ -429,6 +429,9 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [adminLoading, setAdminLoading] = useState(false);
   const [sharedFolder, setSharedFolder] = useState("");
   const [sharedUploadToken, setSharedUploadToken] = useState("");
+  const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState("");
+  const [savingFolderName, setSavingFolderName] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
   const [editingName, setEditingName] = useState("");
   const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
@@ -739,6 +742,37 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
       setError(cause instanceof Error ? cause.message : "设置文件夹可见范围失败");
     } finally {
       setSavingVisibility(false);
+    }
+  };
+
+  const openFolderRename = () => {
+    if (!activeFolder || !canManageFolders) return;
+    setEditingFolder(activeFolder);
+    setEditingFolderName(activeFolder.name);
+  };
+
+  const renameFolder = async () => {
+    const name = editingFolderName.trim();
+    if (!editingFolder || !name || !canManageFolders) return;
+    setSavingFolderName(true);
+    setError("");
+    try {
+      const result = await readJson<{ folder: FolderItem }>(
+        await fetch("/api/folders/name", {
+          method: "PATCH",
+          headers: adminHeaders(true),
+          body: JSON.stringify({ folderSlug: editingFolder.slug, name }),
+        }),
+      );
+      setFolders((current) => current.map((folder) => (
+        folder.slug === result.folder.slug ? { ...folder, name: result.folder.name } : folder
+      )));
+      setEditingFolder(null);
+      setEditingFolderName("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "重命名文件夹失败");
+    } finally {
+      setSavingFolderName(false);
     }
   };
 
@@ -1083,6 +1117,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <button className="secondary-button" onClick={copyFolderLink}>
                 {copied ? <Check size={17} /> : <Link2 size={17} />}
                 {copied ? "已复制" : "文件夹链接"}
+              </button>
+            )}
+            {selectedFolder && canManageFolders && (
+              <button className="secondary-button" onClick={openFolderRename}>
+                <Pencil size={17} />
+                重命名
               </button>
             )}
             {selectedFolder && canManageFolders && (
@@ -1490,6 +1530,25 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <button className="secondary-button" disabled={savingPhoto} onClick={() => setEditingPhoto(null)}>取消</button>
               <button className="primary-button" disabled={!editingName.trim() || savingPhoto} onClick={() => void renamePhoto()}>
                 {savingPhoto ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} 保存
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {editingFolder && (
+        <div className="modal-backdrop" onMouseDown={() => !savingFolderName && setEditingFolder(null)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="rename-folder-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon"><Pencil size={19} /></span><h2 id="rename-folder-title">重命名文件夹</h2></div>
+              <button className="icon-button" disabled={savingFolderName} onClick={() => setEditingFolder(null)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <label className="field-label" htmlFor="editing-folder-name">文件夹名称</label>
+            <input id="editing-folder-name" className="text-input" autoFocus maxLength={80} value={editingFolderName} onChange={(event) => setEditingFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void renameFolder(); }} />
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={savingFolderName} onClick={() => setEditingFolder(null)}>取消</button>
+              <button className="primary-button" disabled={!editingFolderName.trim() || savingFolderName} onClick={() => void renameFolder()}>
+                {savingFolderName ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} 保存
               </button>
             </div>
           </section>
