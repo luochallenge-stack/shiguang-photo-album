@@ -134,6 +134,7 @@ button { color: inherit; }
 .user-copy strong, .user-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-copy strong { font-size: 11px; }
 .user-copy small { margin-top: 3px; color: rgba(255,255,255,.54); font-size: 9px; }
+.shimmer-title { color: #ffd96c; background: linear-gradient(100deg, #d9a928 0%, #fff5b8 42%, #ffd25f 58%, #d9a928 100%); background-size: 220% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 10px rgba(255,210,95,.24); animation: title-shimmer 2.8s ease-in-out infinite; }
 .admin-nav-row { margin-top: 12px; border-top: 1px solid rgba(255,255,255,.1); }
 
 .workspace { min-width: 0; }
@@ -157,6 +158,7 @@ button { color: inherit; }
 .top-identity span, .top-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-identity span { font-size: 11px; font-weight: 800; }
 .top-identity strong { max-width: 130px; color: #645d4b; font-size: 10px; }
+@keyframes title-shimmer { 0%, 100% { background-position: 100% 50%; filter: drop-shadow(0 0 2px rgba(255,210,95,.2)); } 50% { background-position: 0 50%; filter: drop-shadow(0 0 5px rgba(255,224,123,.58)); } }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 
 .search-box {
@@ -534,6 +536,10 @@ button { color: inherit; }
   .remove-lock-button { width: 100%; margin-right: 0; }
   .admin-page-heading { align-items: stretch; flex-direction: column; }
   .admin-tabs { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-title { animation: none; background-position: 50% 50%; }
 }
 
 @media (max-width: 390px) {

@@ -1,0 +1,43 @@
+.permissions-page { min-height: 100vh; padding-bottom: 48rpx; background: #f4f6f5; }
+.access-check { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #7a8883; background: #f4f6f5; font-size: 23rpx; }
+.permissions-header { display: flex; align-items: center; gap: 14rpx; padding: 28rpx; color: #ffffff; background: #21483f; }
+.logo { width: 72rpx; height: 72rpx; flex: 0 0 auto; border-radius: 12rpx; }
+.identity-copy { min-width: 0; }
+.album-name, .member-title, .member-name, .page-eyebrow, .page-title, .page-copy, .user-name, .user-account { display: block; }
+.album-name { overflow: hidden; color: rgba(255,255,255,.72); font-size: 20rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.member-title { max-width: 420rpx; margin-top: 4rpx; overflow: hidden; color: #ffd25f; font-size: 29rpx; font-weight: 800; text-overflow: ellipsis; text-shadow: 0 0 8rpx rgba(255,210,95,.35); white-space: nowrap; animation: title-glow 2.4s ease-in-out infinite; }
+.member-name { margin-top: 3rpx; color: rgba(255,255,255,.68); font-size: 19rpx; }
+.admin-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1rpx solid #dce4e1; background: #ffffff; }
+.admin-tabs button { height: 72rpx; margin: 0; padding: 0; border-radius: 0; color: #71807b; background: transparent; font-size: 23rpx; font-weight: 700; line-height: 72rpx; }
+.admin-tabs button.active { color: #21483f; box-shadow: inset 0 -5rpx #21483f; }
+.page-heading { padding: 34rpx 28rpx 24rpx; }
+.page-eyebrow { color: #b85246; font-size: 20rpx; font-weight: 700; }
+.page-title { margin-top: 8rpx; color: #263c35; font-size: 36rpx; font-weight: 800; }
+.page-copy { margin-top: 12rpx; color: #71807b; font-size: 22rpx; line-height: 1.6; }
+.user-list { padding: 0 28rpx; }
+.user-row { margin-bottom: 18rpx; padding: 24rpx; border: 1rpx solid #dce4e1; border-radius: 8rpx; background: #ffffff; }
+.user-heading, .title-editor, .account-actions { display: flex; align-items: center; gap: 14rpx; }
+.user-heading { justify-content: space-between; }
+.user-name { color: #263c35; font-size: 27rpx; font-weight: 800; }
+.user-account { margin-top: 4rpx; color: #89948f; font-size: 19rpx; }
+.user-status { padding: 6rpx 11rpx; border-radius: 5rpx; font-size: 18rpx; }
+.user-status.active { color: #23674f; background: #dff2e9; }
+.user-status.disabled { color: #9a4d43; background: #f7dfdb; }
+.title-editor { margin-top: 18rpx; }
+.title-editor input { height: 70rpx; min-width: 0; flex: 1; padding: 0 16rpx; border: 1rpx solid #ccd7d3; border-radius: 8rpx; background: #fffdf4; font-size: 23rpx; box-sizing: border-box; }
+.title-editor button { width: 112rpx; height: 70rpx; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 8rpx; color: #ffffff; background: #21483f; font-size: 21rpx; line-height: 70rpx; }
+.title-editor button[disabled] { color: rgba(255,255,255,.7); background: #718b84; }
+.permission-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12rpx; margin-top: 18rpx; }
+.permission-grid label { min-height: 104rpx; display: flex; align-items: center; justify-content: space-between; gap: 6rpx; padding: 12rpx; border: 1rpx solid #dce4e1; border-radius: 8rpx; background: #f7f9f8; box-sizing: border-box; }
+.permission-copy { min-width: 0; }
+.permission-copy text { display: block; }
+.permission-copy text:first-child { color: #33463f; font-size: 21rpx; font-weight: 800; }
+.permission-copy text:last-child { margin-top: 5rpx; color: #82908b; font-size: 16rpx; line-height: 1.35; }
+.permission-grid switch { flex: 0 0 auto; margin-right: -8rpx; transform: scale(.72); transform-origin: right center; }
+.account-actions { margin-top: 16rpx; }
+.account-actions button { width: 150rpx; height: 62rpx; margin: 0 0 0 auto; padding: 0; border-radius: 8rpx; color: #8d4b43; background: #f7e6e3; font-size: 20rpx; line-height: 62rpx; }
+.account-actions button[disabled] { color: #9aa39f; background: #ecefed; }
+.super-admin-badge { width: 100%; padding: 16rpx; border-radius: 8rpx; color: #72540d; background: #fff3ca; font-size: 21rpx; font-weight: 800; text-align: center; box-sizing: border-box; }
+.page-state { min-height: 320rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36rpx; color: #7a8883; font-size: 23rpx; text-align: center; }
+.error-state button { height: 66rpx; margin-top: 22rpx; padding: 0 28rpx; border-radius: 8rpx; color: #ffffff; background: #21483f; font-size: 22rpx; line-height: 66rpx; }
+@keyframes title-glow { 0%, 100% { color: #ffd25f; text-shadow: 0 0 6rpx rgba(255,210,95,.3); } 50% { color: #fff5b8; text-shadow: 0 0 16rpx rgba(255,238,153,.88), 0 0 28rpx rgba(255,210,95,.5); } }

@@ -1046,7 +1046,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             {initialUser.avatarUrl ? <img src={initialUser.avatarUrl} alt="" /> : <UserRound size={18} />}
           </span>
           <span className="user-copy">
-            <strong>{initialUser.title || initialUser.displayName}</strong>
+            <strong className={initialUser.title ? "shimmer-title" : undefined}>{initialUser.title || initialUser.displayName}</strong>
             <small>{initialUser.title ? `${initialUser.displayName} · ${permissionSummary(initialUser.permissions)}` : `${providerLabel(initialUser.provider)} · ${permissionSummary(initialUser.permissions)}`}</small>
           </span>
           <button className="icon-button inverse" onClick={() => void logout()} title="退出登录" aria-label="退出登录"><LogOut size={16} /></button>
@@ -1071,7 +1071,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           </div>
           <div className="top-identity" aria-label="当前用户称号">
             <Crown size={16} />
-            <span>{initialUser.title || permissionSummary(initialUser.permissions)}</span>
+            <span className={initialUser.title ? "shimmer-title" : undefined}>{initialUser.title || permissionSummary(initialUser.permissions)}</span>
             <strong>{initialUser.displayName}</strong>
           </div>
           <div className="top-actions">

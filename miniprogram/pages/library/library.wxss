@@ -9,8 +9,12 @@
 .album-name, .member-title, .member-name, .folder-title, .photo-count, .media-name, .media-meta, .empty-title, .empty-copy, .dialog-eyebrow, .dialog-title, .dialog-copy { display: block; }
 .album-name { overflow: hidden; color: rgba(255,255,255,.72); font-size: 20rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .member-title { max-width: 350rpx; margin-top: 4rpx; overflow: hidden; color: #ffd25f; font-size: 29rpx; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.member-title.is-shiny { text-shadow: 0 0 8rpx rgba(255,210,95,.35); animation: title-glow 2.4s ease-in-out infinite; }
 .member-name { margin-top: 3rpx; color: rgba(255,255,255,.68); font-size: 19rpx; }
 .logout-button { width: 92rpx; height: 56rpx; flex: 0 0 auto; margin: 0; padding: 0; border: 1rpx solid rgba(255,255,255,.28); border-radius: 10rpx; color: #ffffff; background: transparent; font-size: 22rpx; line-height: 56rpx; }
+.admin-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1rpx solid #dce4e1; background: #ffffff; }
+.admin-tabs button { height: 72rpx; margin: 0; padding: 0; border-radius: 0; color: #71807b; background: transparent; font-size: 23rpx; font-weight: 700; line-height: 72rpx; }
+.admin-tabs button.active { color: #21483f; box-shadow: inset 0 -5rpx #21483f; }
 .folder-menu-backdrop { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; left: 0; background: rgba(13,25,21,.52); }
 .folder-menu-panel { width: 84vw; max-width: 640rpx; height: 100%; display: flex; flex-direction: column; padding: 32rpx 24rpx calc(24rpx + env(safe-area-inset-bottom)); background: #ffffff; box-shadow: 18rpx 0 42rpx rgba(12,31,25,.24); box-sizing: border-box; }
 .folder-menu-header { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; padding: 8rpx 4rpx 24rpx; border-bottom: 1rpx solid #e1e7e4; }
@@ -118,6 +122,7 @@
 .people-status { padding: 5rpx 10rpx; border-radius: 5rpx; font-size: 18rpx; }
 .people-status.active { color: #23674f; background: #dff2e9; }
 .people-status.disabled { color: #9a4d43; background: #f7dfdb; }
+.people-title-badge { padding: 5rpx 10rpx; border-radius: 5rpx; color: #75601d; background: #fff3ca; font-size: 18rpx; }
 .people-title-edit { margin-top: 16rpx; }
 .people-title-edit input { height: 68rpx; min-width: 0; flex: 1; padding: 0 16rpx; border: 1rpx solid #ccd7d3; border-radius: 8rpx; background: #fffdf4; font-size: 23rpx; box-sizing: border-box; }
 .people-title-edit button, .people-access-edit button { width: 112rpx; height: 68rpx; flex: 0 0 auto; margin: 0; padding: 0; border-radius: 8rpx; font-size: 21rpx; line-height: 68rpx; }
@@ -146,3 +151,4 @@
 .upload-status-copy { display: flex; align-items: center; justify-content: space-between; font-size: 22rpx; }
 .upload-track { height: 8rpx; margin-top: 16rpx; overflow: hidden; border-radius: 4rpx; background: rgba(255,255,255,.2); }
 .upload-value { height: 100%; border-radius: 4rpx; background: #ffd25f; transition: width .18s ease; }
+@keyframes title-glow { 0%, 100% { color: #ffd25f; text-shadow: 0 0 6rpx rgba(255,210,95,.3); } 50% { color: #fff5b8; text-shadow: 0 0 16rpx rgba(255,238,153,.88), 0 0 28rpx rgba(255,210,95,.5); } }

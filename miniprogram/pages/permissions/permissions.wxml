@@ -1,0 +1,60 @@
+<view wx:if="{{authorized}}" class="permissions-page safe-bottom">
+  <view class="permissions-header">
+    <image class="logo" src="/images/logo.png" mode="aspectFill" />
+    <view class="identity-copy">
+      <text class="album-name">伞兵训练营的时光集</text>
+      <text class="member-title">{{user.title || '伞兵指挥官'}}</text>
+      <text class="member-name">{{user.displayName || user.accountLabel}} · 超级管理员</text>
+    </view>
+  </view>
+
+  <view class="admin-tabs">
+    <button bindtap="openAlbum">相册</button>
+    <button class="active">用户权限</button>
+  </view>
+
+  <view class="page-heading">
+    <text class="page-eyebrow">超级管理员专属</text>
+    <text class="page-title">用户权限</text>
+    <text class="page-copy">为成员分别设置访问、上传、编辑、删除、文件夹和赋予称号权限。阿里山清茶始终拥有全部权限。</text>
+  </view>
+
+  <view wx:if="{{loading}}" class="page-state">正在读取用户权限</view>
+  <view wx:elif="{{error}}" class="page-state error-state">
+    <text>{{error}}</text>
+    <button bindtap="refresh">重新加载</button>
+  </view>
+  <view wx:else class="user-list">
+    <view class="user-row" wx:for="{{users}}" wx:key="id">
+      <view class="user-heading">
+        <view>
+          <text class="user-name">{{item.displayName}}</text>
+          <text class="user-account">{{item.accountLabel}}</text>
+        </view>
+        <text class="user-status {{item.status}}">{{item.statusLabel}}</text>
+      </view>
+
+      <view class="title-editor">
+        <input value="{{item.title}}" data-id="{{item.id}}" bindinput="updateTitle" maxlength="20" placeholder="设置称号" />
+        <button data-id="{{item.id}}" bindtap="saveTitle" loading="{{savingUserId === item.id}}" disabled="{{savingUserId !== ''}}">保存</button>
+      </view>
+
+      <view class="permission-grid">
+        <label wx:for="{{item.permissionItems}}" wx:for-item="permission" wx:key="key">
+          <view class="permission-copy">
+            <text>{{permission.label}}</text>
+            <text>{{permission.description}}</text>
+          </view>
+          <switch checked="{{permission.enabled}}" data-id="{{item.id}}" data-key="{{permission.key}}" bindchange="togglePermission" disabled="{{item.superAdmin || savingUserId !== ''}}" color="#21483f" />
+        </label>
+      </view>
+
+      <view class="account-actions">
+        <text wx:if="{{item.superAdmin}}" class="super-admin-badge">超级管理员 · 全部权限</text>
+        <button wx:else data-id="{{item.id}}" bindtap="toggleStatus" disabled="{{savingUserId !== ''}}">{{item.status === 'active' ? '停用账号' : '启用账号'}}</button>
+      </view>
+    </view>
+    <view class="page-state" wx:if="{{!users.length}}">还没有用户记录</view>
+  </view>
+</view>
+<view wx:else class="access-check">正在验证管理权限</view>

@@ -363,11 +363,21 @@ Page({
 
   openUserManagement() {
     if (!this.data.user.canOpenPeople) return;
+    if (this.data.user.canManagePermissions) {
+      this.openPermissionsPage();
+      return;
+    }
     this.setData({ folderMenuOpen: false, userManagementOpen: true, managedUsersLoading: true });
     api.request("/api/admin/users")
       .then(({ users }) => this.setData({ managedUsers: (users || []).map(decorateManagedUser) }))
       .catch((error) => wx.showToast({ title: error.message || "读取人员失败", icon: "none" }))
       .finally(() => this.setData({ managedUsersLoading: false }));
+  },
+
+  openPermissionsPage() {
+    if (!this.data.user.canManagePermissions) return;
+    this.setData({ folderMenuOpen: false });
+    wx.navigateTo({ url: "/pages/permissions/permissions" });
   },
 
   closeUserManagement() {

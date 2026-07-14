@@ -2,6 +2,7 @@
   "pages": [
     "pages/login/login",
     "pages/library/library",
+    "pages/permissions/permissions",
     "pages/viewer/viewer"
   ],
   "window": {

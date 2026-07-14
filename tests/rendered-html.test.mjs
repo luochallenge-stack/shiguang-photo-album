@@ -138,7 +138,7 @@ test("paginates CloudBase media queries by album for both clients", async () => 
 });
 
 test("ships a native WeChat mini program with token authentication", async () => {
-  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute, libraryTemplate, folderOrderRoute, folderNameRoute, coverRoute, generateCoverRoute, videoCover, dockerfile, cloudbase] = await Promise.all([
+  const [projectText, app, api, login, library, viewer, viewerLogic, auth, accessControl, libraryRoute, mediaUrlRoute, libraryTemplate, permissionsPage, permissionsTemplate, folderOrderRoute, folderNameRoute, coverRoute, generateCoverRoute, videoCover, dockerfile, cloudbase] = await Promise.all([
     readFile(new URL("../miniprogram/project.config.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/app.json", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/utils/api.js", import.meta.url), "utf8"),
@@ -151,6 +151,8 @@ test("ships a native WeChat mini program with token authentication", async () =>
     readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/permissions/permissions.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/permissions/permissions.wxml", import.meta.url), "utf8"),
     readFile(new URL("../app/api/folders/order/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/folders/name/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/photos/cover/route.ts", import.meta.url), "utf8"),
@@ -164,6 +166,7 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.equal(project.appid, "wx5c6f75fd860fb659");
   assert.match(app, /pages\/login\/login/);
   assert.match(app, /pages\/library\/library/);
+  assert.match(app, /pages\/permissions\/permissions/);
   assert.match(api, /x-album-client/);
   assert.match(api, /Authorization: `Bearer/);
   assert.match(login, /api\/auth\/session/);
@@ -175,6 +178,11 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(libraryTemplate, /folder-menu-panel/);
   assert.match(libraryTemplate, /create-folder-menu-button/);
   assert.match(libraryTemplate, /menu-line/);
+  assert.match(library, /openPermissionsPage/);
+  assert.match(permissionsPage, /accountLabel === "alishan-tea"/);
+  assert.match(permissionsPage, /authorized: false/);
+  assert.match(permissionsPage, /api\.request\("\/api\/admin\/users"\)/);
+  assert.match(permissionsTemplate, /用户权限/);
   assert.match(folderOrderRoute, /updateFolderSortOrders/);
   assert.match(folderNameRoute, /updateFolderName/);
   assert.match(cloudbase, /sortOrder/);
@@ -262,7 +270,7 @@ test("enforces identity-based folder visibility across backend entry points", as
 });
 
 test("supports titles and granular permissions on both clients", async () => {
-  const [cloudbase, auth, accessControl, usersRoute, photoRoute, batchRoute, folderRoute, client, miniLibrary, miniTemplate] = await Promise.all([
+  const [cloudbase, auth, accessControl, usersRoute, photoRoute, batchRoute, folderRoute, client, styles, miniLibrary, miniTemplate, miniPermissions, miniPermissionsTemplate, miniStyles] = await Promise.all([
     readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
@@ -271,8 +279,12 @@ test("supports titles and granular permissions on both clients", async () => {
     readFile(new URL("../app/api/photos/batch/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/folders/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
     readFile(new URL("../miniprogram/pages/library/library.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/permissions/permissions.js", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/permissions/permissions.wxml", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/permissions/permissions.wxss", import.meta.url), "utf8"),
   ]);
   assert.match(cloudbase, /AlbumUserPermissions/);
   assert.match(cloudbase, /manageFolders: boolean/);
@@ -302,7 +314,12 @@ test("supports titles and granular permissions on both clients", async () => {
   assert.match(miniLibrary, /PERMISSION_OPTIONS/);
   assert.match(miniLibrary, /canManagePermissions/);
   assert.match(miniLibrary, /canAssignTitles/);
-  assert.match(miniTemplate, /人员与权限/);
-  assert.match(miniTemplate, /toggleManagedPermission/);
+  assert.match(miniTemplate, /openPermissionsPage/);
+  assert.match(miniPermissions, /PERMISSION_OPTIONS/);
+  assert.match(miniPermissions, /togglePermission/);
+  assert.match(miniPermissions, /superAdmin/);
+  assert.match(miniPermissionsTemplate, /permission\.description/);
   assert.match(miniTemplate, /member-title/);
+  assert.match(styles, /\.shimmer-title/);
+  assert.match(miniStyles, /@keyframes title-glow/);
 });
