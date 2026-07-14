@@ -24,6 +24,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RefreshCw,
   Search,
   Share2,
   ShieldCheck,
@@ -554,6 +555,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [dedupeHashedCount, setDedupeHashedCount] = useState(0);
   const [dedupeSaving, setDedupeSaving] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [videoRefreshRunning, setVideoRefreshRunning] = useState(false);
+  const [videoRefreshMessage, setVideoRefreshMessage] = useState("");
   const [sharedFolder, setSharedFolder] = useState("");
   const [sharedUploadToken, setSharedUploadToken] = useState("");
   const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
@@ -1268,6 +1271,30 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     }
   };
 
+  const runVideoRefresh = async () => {
+    if (!isSuperAdmin || videoRefreshRunning) return;
+    setVideoRefreshRunning(true);
+    setVideoRefreshMessage("");
+    setError("");
+    try {
+      const result = await readJson<{ startedCount: number; videos?: Array<{ name: string }> }>(await fetch("/api/photos/hls/backfill", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 2, includeFailed: true }),
+      }));
+      const names = (result.videos || []).map((video) => video.name).filter(Boolean);
+      setVideoRefreshMessage(
+        result.startedCount > 0
+          ? `已启动 ${result.startedCount} 个历史视频转码${names.length ? `：${names.slice(0, 2).join("、")}` : ""}`
+          : "当前没有需要补跑的视频",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "启动视频补跑失败");
+    } finally {
+      setVideoRefreshRunning(false);
+    }
+  };
+
   const updateManagedUser = async (
     target: ManagedAlbumUser,
     changes: { permissions?: AlbumUserPermissions; status?: PublicAlbumUser["status"]; title?: string },
@@ -1612,6 +1639,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <strong>{adminSection === "users" ? "用户管理" : adminSection === "duplicates" ? "图片去重" : "访问与操作日志"}</strong>
             </div>
             <div className="top-actions">
+              {isSuperAdmin && (
+                <button className="secondary-button" onClick={() => void runVideoRefresh()} disabled={videoRefreshRunning}>
+                  {videoRefreshRunning ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}
+                  补跑视频转码
+                </button>
+              )}
               <button className="secondary-button" onClick={() => void loadAdminData()} disabled={adminLoading}>
                 {adminLoading ? <LoaderCircle className="spin" size={17} /> : <Activity size={17} />}
                 刷新
@@ -1626,6 +1659,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <div className="error-banner" role="alert">
                 <span>{error}</span>
                 <button className="icon-button" onClick={() => setError("")} aria-label="关闭"><X size={16} /></button>
+              </div>
+            )}
+            {videoRefreshMessage && (
+              <div className="notice" role="status">
+                <RefreshCw size={17} />
+                <span>{videoRefreshMessage}</span>
               </div>
             )}
             <div className="admin-page-heading">
