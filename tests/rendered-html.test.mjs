@@ -89,6 +89,32 @@ test("limits desktop image previews to 70 percent of the viewport", async () => 
   assert.match(styles, /\.preview-canvas img \{ max-width: 70vw; max-height: 70vh; \}/);
 });
 
+test("creates 24-hour public image links without exposing album sessions", async () => {
+  const [shareRoute, sharePage, imageRoute, downloadRoute, mediaShare, cloudbase, miniLibrary] = await Promise.all([
+    readFile(new URL("../app/api/photos/share/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/s/[token]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/s/[token]/image/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/s/[token]/download/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/media-share.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(shareRoute, /24 \* 60 \* 60 \* 1000/);
+  assert.match(shareRoute, /createMediaShareRecord/);
+  assert.match(shareRoute, /canUserReadFolder/);
+  assert.match(shareRoute, /media\.share\.link\.create/);
+  assert.match(cloudbase, /album_media_shares/);
+  assert.match(cloudbase, /mediaShareTokenHash/);
+  assert.match(mediaShare, /Date\.parse\(record\.expiresAt\) <= Date\.now\(\)/);
+  assert.match(mediaShare, /photo\.deletedAt/);
+  assert.match(sharePage, /24 小时内有效/);
+  assert.match(imageRoute, /shared\.displayUrl/);
+  assert.match(downloadRoute, /mediaDownloadUrl/);
+  assert.doesNotMatch(sharePage + imageRoute + downloadRoute, /currentUser|ALBUM_SESSION_SECRET/);
+  assert.match(miniLibrary, /createMediaShareLink/);
+  assert.match(miniLibrary, /wx\.setClipboardData/);
+});
+
 test("supports dual-client batch editing with a seven-day recycle bin", async () => {
   const [client, styles, libraryRoute, batchRoute, recycleRoute, cloudbase, miniLibrary, miniTemplate] = await Promise.all([
     readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),

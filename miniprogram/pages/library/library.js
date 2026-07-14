@@ -815,6 +815,8 @@ Page({
       handlers.push(() => this.shareOriginalFile(item));
       actions.push("图片分享与保存");
       handlers.push(() => this.shareOriginalImage(item));
+      actions.push("复制24小时查看链接");
+      handlers.push(() => this.createMediaShareLink(item));
     }
     if (this.data.user.canEdit) {
       actions.push("重命名");
@@ -867,6 +869,31 @@ Page({
         folderSlug: item.folderSlug,
       },
     }).catch(() => {});
+  },
+
+  async createMediaShareLink(item) {
+    if (!item || item.video) return;
+    wx.showLoading({ title: "正在生成链接", mask: true });
+    try {
+      const result = await api.request("/api/photos/share", {
+        method: "POST",
+        data: { photoId: item.id },
+      });
+      if (!result.url) throw new Error("服务器没有返回分享链接");
+      await new Promise((resolve, reject) => {
+        wx.setClipboardData({ data: result.url, success: resolve, fail: reject });
+      });
+      wx.showModal({
+        title: "链接已复制",
+        content: "粘贴到个人或群聊即可打开。链接 24 小时内有效，对方无需登录，可查看并下载原图。",
+        showCancel: false,
+        confirmText: "知道了",
+      });
+    } catch (error) {
+      wx.showToast({ title: error.message || "生成分享链接失败", icon: "none", duration: 3000 });
+    } finally {
+      wx.hideLoading();
+    }
   },
 
   async shareOriginalFile(item) {

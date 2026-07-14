@@ -157,6 +157,8 @@ const ACTION_LABELS: Record<string, string> = {
   "media.view": "预览影像",
   "media.download": "下载影像",
   "media.share": "转发影像",
+  "media.share.link.create": "生成24小时分享链接",
+  "media.recycle.folder": "删除文件夹并回收影像",
   "media.upload": "上传影像",
   "media.rename": "重命名影像",
   "media.delete": "删除影像",

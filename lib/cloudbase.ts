@@ -89,6 +89,14 @@ export type AlbumAuditLog = {
   createdAt: string;
 };
 
+export type AlbumMediaShare = {
+  id: string;
+  photoId: string;
+  createdByUserId: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 type UploadTokenRecord = {
   folderSlug: string;
   tokenHash: string;
@@ -101,6 +109,7 @@ const COLLECTIONS = {
   uploadTokens: "album_upload_tokens",
   users: "album_users",
   auditLogs: "album_audit_logs",
+  mediaShares: "album_media_shares",
 } as const;
 
 let app: ReturnType<typeof cloudbaseSdk.init> | null = null;
@@ -529,4 +538,38 @@ export async function resolvePhotoUrls(fileIds: string[], maxAge = 600): Promise
     }
   }
   return fileIds.map((fileId) => urls.get(fileId) || fileId);
+}
+
+async function mediaShareTokenHash(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function createMediaShareRecord(
+  photoId: string,
+  createdByUserId: string,
+  expiresAt: string,
+): Promise<{ token: string; record: AlbumMediaShare }> {
+  const token = crypto.randomUUID().replaceAll("-", "");
+  const id = await mediaShareTokenHash(token);
+  const record: AlbumMediaShare = {
+    id,
+    photoId,
+    createdByUserId,
+    createdAt: new Date().toISOString(),
+    expiresAt,
+  };
+  await database().collection(COLLECTIONS.mediaShares).doc(id).set(record);
+  return { token, record };
+}
+
+export async function findMediaShareRecord(token: string): Promise<AlbumMediaShare | null> {
+  if (!/^[a-zA-Z0-9_-]{20,64}$/.test(token)) return null;
+  const id = await mediaShareTokenHash(token);
+  const result = await database().collection(COLLECTIONS.mediaShares).doc(id).get();
+  return rows<AlbumMediaShare>(result)[0] || null;
+}
+
+export async function deleteMediaShareRecord(id: string): Promise<void> {
+  await database().collection(COLLECTIONS.mediaShares).doc(id).remove();
 }

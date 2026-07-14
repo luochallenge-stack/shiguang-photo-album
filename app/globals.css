@@ -480,6 +480,18 @@ button { color: inherit; }
 .audit-fingerprint { overflow: hidden; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .table-empty { min-height: 220px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
 
+.public-share-page { min-height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; color: #172420; background: #eef2f0; }
+.public-share-header { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px clamp(18px, 4vw, 52px); border-bottom: 1px solid #d7dfdb; background: #fff; }
+.public-share-header span, .public-share-expired span { display: block; color: #66736f; font-size: 11px; font-weight: 700; }
+.public-share-header h1, .public-share-expired h1 { margin: 4px 0 0; overflow-wrap: anywhere; font-size: clamp(18px, 3vw, 26px); letter-spacing: 0; }
+.public-share-header a { min-width: 104px; height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; border-radius: 6px; color: #fff; background: #1f5a49; font-size: 13px; font-weight: 800; text-decoration: none; }
+.public-share-media { min-height: 0; display: grid; place-items: center; padding: clamp(16px, 3vw, 36px); overflow: auto; }
+.public-share-media img { width: auto; height: auto; max-width: min(100%, 1400px); max-height: calc(100vh - 170px); object-fit: contain; box-shadow: 0 12px 34px rgba(21, 41, 34, .16); }
+.public-share-footer { min-height: 44px; display: grid; place-items: center; padding: 10px 18px; color: #66736f; background: #fff; font-size: 11px; }
+.public-share-expired { place-items: center; grid-template-rows: 1fr; padding: 28px; text-align: center; }
+.public-share-expired > div { max-width: 520px; }
+.public-share-expired p { margin: 14px 0 0; color: #66736f; line-height: 1.8; }
+
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -492,6 +504,11 @@ button { color: inherit; }
 }
 
 @media (max-width: 680px) {
+  .public-share-header { align-items: flex-start; padding: 12px 14px; }
+  .public-share-header h1 { max-width: 62vw; font-size: 16px; }
+  .public-share-header a { min-width: 92px; height: 36px; padding-inline: 12px; font-size: 12px; }
+  .public-share-media { padding: 10px; }
+  .public-share-media img { max-height: calc(100vh - 150px); }
   .login-shell { display: block; background: white; }
   .login-brand { min-height: auto; padding: 30px 24px 34px; }
   .login-brand-mark { width: 46px; height: 46px; }

@@ -208,6 +208,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 双端图片预览使用 CloudBase `imageMogr2/auto-orient` 按 EXIF 自动回正；小程序列表在此基础上生成 640x640 WebP 缩略图。
 - 小程序打开图片或视频时调用 `GET /api/photos/url?id=...` 刷新地址。
 - 小程序“发送给朋友（原文件）”先把原始文件下载到带正确扩展名的本地路径，再调用 `wx.shareFileMessage`；“图片分享与保存”下载自动回正后的图片并调用 `wx.showShareImageMenu`，不要转发列表缩略图。
+- 小程序可为单张图片生成 24 小时公开链接。`POST /api/photos/share` 写入哈希令牌记录，公开页 `/s/{token}`、预览和下载路由每次都校验过期时间；图片被删除后链接立即失效，令牌不可替代站内会话访问其他资源。
 - 图片刷新地址有效期 10 分钟，视频刷新地址有效期 2 小时。
 - `GET /api/photos/url` 必须先检查所属文件夹的读取权限，并返回 `cache-control: no-store`。
 - 中文文件夹或文件名可能出现在临时 URL 中，小程序赋给 `<video>` 或预览组件前必须保留 `encodeURI(url)`。
@@ -234,6 +235,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `POST /api/photos/upload` | upload/上传令牌 | 生成 Web 直传信息和票据 |
 | `PATCH /api/photos/upload` | upload/上传令牌 | 确认 Web 直传并登记媒体 |
 | `POST /api/photos` | upload/上传令牌 | multipart 上传，供小程序照片和视频使用 |
+| `POST /api/photos/share` | read | 为单张可见图片生成 24 小时公开查看、下载链接 |
 | `POST /api/photos/cover` | upload | 为已上传视频保存首帧封面 |
 | `PATCH /api/photos` | edit | 重命名单项媒体 |
 | `DELETE /api/photos` | delete | 将单项媒体移入回收站 |
