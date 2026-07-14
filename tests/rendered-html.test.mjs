@@ -262,13 +262,16 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(library, /uploadSelectedMedia/);
   assert.match(api, /wx\.uploadFile/);
   assert.match(viewer, /<video/);
+  assert.match(viewer, /<swiper/);
   assert.match(viewer, /mode="aspectFit"/);
-  assert.match(viewer, /switchImage/);
+  assert.match(viewer, /bindchange="handleImageSwiperChange"/);
+  assert.match(viewer, /show-menu-by-longpress="\{\{true\}\}"/);
   assert.match(viewer, /closeImage/);
   assert.match(viewer, /object-fit="contain"/);
   assert.match(viewerLogic, /api\/photos\/url/);
   assert.match(viewerLogic, /albumViewerPhotos/);
   assert.match(viewerLogic, /mode: "image"/);
+  assert.match(viewerLogic, /handleImageSwiperChange/);
   assert.match(viewerLogic, /encodeURI\(url\)/);
   assert.match(viewerLogic, /handleVideoError/);
   assert.match(libraryRoute, /MINI_PROGRAM_PAGE_SIZE = 24/);

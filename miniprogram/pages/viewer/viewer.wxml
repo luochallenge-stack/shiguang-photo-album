@@ -1,16 +1,25 @@
 <view class="viewer-page" wx:if="{{media.id}}">
   <view wx:if="{{mode === 'image'}}" class="image-shell">
-    <image
-      wx:if="{{imageUrl}}"
-      class="image-player"
-      src="{{imageUrl}}"
-      mode="aspectFit"
-      bindtap="closeImage"
-      bindload="handleLoaded"
-      binderror="handleVideoError"
-    />
-    <button wx:if="{{photos.length > 1}}" class="viewer-arrow previous" data-direction="-1" bindtap="switchImage">‹</button>
-    <button wx:if="{{photos.length > 1}}" class="viewer-arrow next" data-direction="1" bindtap="switchImage">›</button>
+    <swiper
+      wx:if="{{photos.length}}"
+      class="image-swiper"
+      current="{{index}}"
+      circular="{{photos.length > 1}}"
+      duration="220"
+      bindchange="handleImageSwiperChange"
+    >
+      <swiper-item wx:for="{{photos}}" wx:key="id">
+        <image
+          class="image-player"
+          src="{{item.viewerUrl || item.previewUrl || item.url}}"
+          mode="aspectFit"
+          show-menu-by-longpress="{{true}}"
+          bindtap="closeImage"
+          bindload="handleLoaded"
+          binderror="handleVideoError"
+        />
+      </swiper-item>
+    </swiper>
     <view class="player-loading" wx:if="{{loading || waiting}}">
       <text>{{waiting ? '网络缓冲中' : '正在获取图片地址'}}</text>
     </view>

@@ -41,13 +41,17 @@ Page({
       wx.navigateBack();
       return;
     }
-    this.setData({ media, imageUrl: "", loading: true, waiting: false, error: "" });
+    const currentUrl = media.viewerUrl || media.previewUrl || media.url || "";
+    this.setData({ media, imageUrl: currentUrl, loading: true, waiting: false, error: "" });
     wx.setNavigationBarTitle({ title: media.name || "图片" });
     api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`)
       .then((result) => {
         const url = encodeURI(result.displayUrl || result.url || media.previewUrl || media.url || "");
         if (!url) throw new Error("服务器没有返回图片链接");
-        this.setData({ imageUrl: url, loading: false });
+        const photos = this.data.photos.map((photo, index) => index === this.data.index
+          ? { ...photo, viewerUrl: url }
+          : photo);
+        this.setData({ photos, media: { ...media, viewerUrl: url }, imageUrl: url, loading: false });
       })
       .catch((error) => {
         if (error.statusCode === 401) {
@@ -59,11 +63,9 @@ Page({
       });
   },
 
-  switchImage(event) {
-    const direction = Number(event.currentTarget.dataset.direction) || 1;
-    const total = this.data.photos.length;
-    if (!total) return;
-    const index = (this.data.index + direction + total) % total;
+  handleImageSwiperChange(event) {
+    const index = Number(event.detail && event.detail.current) || 0;
+    if (index === this.data.index) return;
     this.setData({ index }, () => this.loadImage());
   },
 
