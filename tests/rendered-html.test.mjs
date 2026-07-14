@@ -266,7 +266,8 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(viewer, /mode="aspectFit"/);
   assert.match(viewer, /bindchange="handleImageSwiperChange"/);
   assert.match(viewer, /show-menu-by-longpress="\{\{true\}\}"/);
-  assert.match(viewer, /长按可保存或转发/);
+  assert.match(viewer, /wx:if="\{\{mode !== 'image'\}\}" class="video-copy"/);
+  assert.doesNotMatch(viewer, /长按可保存或转发/);
   assert.match(viewer, /closeImage/);
   assert.match(viewer, /object-fit="contain"/);
   assert.match(viewerLogic, /api\/photos\/url/);
