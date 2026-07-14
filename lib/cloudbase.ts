@@ -5,9 +5,14 @@ export type AlbumFolder = {
   name: string;
   slug: string;
   createdAt: string;
+  creatorUserId?: string;
+  visibilityType?: FolderVisibilityType;
+  visibleUserIds?: string[];
   passwordHash?: string;
   sortOrder?: number;
 };
+
+export type FolderVisibilityType = "all" | "admins" | "specific";
 
 export type AlbumPhoto = {
   id: string;
@@ -140,9 +145,12 @@ function activePhotoFilter(folderSlug?: string, excludedFolderSlugs: string[] = 
   };
 }
 
-function recycledPhotoFilter(): Record<string, unknown> {
+function recycledPhotoFilter(excludedFolderSlugs: string[] = []): Record<string, unknown> {
   const command = database().command;
-  return { deletedAt: command.exists(true).and(command.neq("")) };
+  return {
+    deletedAt: command.exists(true).and(command.neq("")),
+    ...(excludedFolderSlugs.length ? { folderSlug: command.nin(excludedFolderSlugs) } : {}),
+  };
 }
 
 async function queryPhotoPage(
@@ -195,8 +203,16 @@ export async function createFolderRecord(folder: AlbumFolder): Promise<void> {
   await database().collection(COLLECTIONS.folders).doc(folder.id).set(folder);
 }
 
-export async function updateFolderPasswordHash(id: string, passwordHash: string): Promise<void> {
-  await database().collection(COLLECTIONS.folders).doc(id).update({ passwordHash });
+export async function updateFolderVisibility(
+  id: string,
+  visibilityType: FolderVisibilityType,
+  visibleUserIds: string[],
+): Promise<void> {
+  await database().collection(COLLECTIONS.folders).doc(id).update({
+    visibilityType,
+    visibleUserIds: visibilityType === "specific" ? visibleUserIds : [],
+    passwordHash: "",
+  });
 }
 
 export async function updateFolderName(id: string, name: string): Promise<void> {
@@ -223,8 +239,17 @@ export async function listPhotoPage(options: {
   );
 }
 
-export async function listRecycledPhotoPage(options: { offset?: number; limit?: number } = {}): Promise<AlbumPhotoPage> {
-  return queryPhotoPage(recycledPhotoFilter(), "deletedAt", options.offset || 0, options.limit || 48);
+export async function listRecycledPhotoPage(options: {
+  excludedFolderSlugs?: string[];
+  offset?: number;
+  limit?: number;
+} = {}): Promise<AlbumPhotoPage> {
+  return queryPhotoPage(
+    recycledPhotoFilter(options.excludedFolderSlugs),
+    "deletedAt",
+    options.offset || 0,
+    options.limit || 48,
+  );
 }
 
 export async function countActivePhotosByFolder(): Promise<Record<string, number>> {
@@ -243,8 +268,8 @@ export async function countActivePhotosByFolder(): Promise<Record<string, number
   return counts;
 }
 
-export async function countRecycledPhotos(): Promise<number> {
-  const result = await database().collection(COLLECTIONS.photos).where(recycledPhotoFilter()).count();
+export async function countRecycledPhotos(excludedFolderSlugs: string[] = []): Promise<number> {
+  const result = await database().collection(COLLECTIONS.photos).where(recycledPhotoFilter(excludedFolderSlugs)).count();
   return Math.max(0, Number(result.total) || 0);
 }
 

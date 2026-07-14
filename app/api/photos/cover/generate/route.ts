@@ -1,10 +1,12 @@
 import {
   createObjectKey,
+  findFolder,
   findPhoto,
   resolvePhotoUrls,
   updatePhotoCoverFileId,
   uploadPhoto,
 } from "../../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../../lib/access";
 import { recordAudit } from "../../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../../lib/auth";
 import { isVideoMimeType } from "../../../../../lib/media";
@@ -23,6 +25,10 @@ export async function POST(request: Request) {
 
     const photo = await findPhoto(photoId);
     if (!photo || photo.deletedAt) return Response.json({ error: "视频不存在" }, { status: 404 });
+    const folder = await findFolder(photo.folderSlug);
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "视频不存在" }, { status: 404 });
+    }
     if (!isVideoMimeType(photo.mimeType)) return Response.json({ error: "只有视频可以生成封面" }, { status: 400 });
     if (photo.coverFileId) {
       const [coverUrl] = await resolvePhotoUrls([photo.coverFileId]);

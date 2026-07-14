@@ -4,7 +4,9 @@ import {
   movePhotoRecord,
   recyclePhotoRecord,
   type AlbumPhoto,
+  type AlbumUser,
 } from "../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 
@@ -23,6 +25,13 @@ function photoIds(value: unknown): string[] {
 async function batchPhotos(ids: string[]): Promise<AlbumPhoto[] | null> {
   const photos = await Promise.all(ids.map((id) => findPhoto(id)));
   return photos.some((photo) => !photo) ? null : photos as AlbumPhoto[];
+}
+
+async function photosAreVisible(photos: AlbumPhoto[], user: AlbumUser): Promise<boolean> {
+  const folders = await Promise.all(
+    [...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolder(slug)),
+  );
+  return folders.every((folder) => Boolean(folder && canUserReadFolder(folder, user)));
 }
 
 function validateIds(ids: string[]): Response | null {
@@ -45,10 +54,15 @@ export async function PATCH(request: Request) {
     const targetFolderSlug = typeof body.targetFolderSlug === "string" ? body.targetFolderSlug.trim() : "";
     if (!targetFolderSlug) return Response.json({ error: "请选择目标文件夹" }, { status: 400 });
     const targetFolder = await findFolder(targetFolderSlug);
-    if (!targetFolder) return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
+    if (!targetFolder || !canUserReadFolder(targetFolder, user)) {
+      return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
+    }
 
     const photos = await batchPhotos(ids);
     if (!photos) return Response.json({ error: "部分影像不存在，请刷新后重试" }, { status: 404 });
+    if (!(await photosAreVisible(photos, user))) {
+      return Response.json({ error: "部分影像不存在，请刷新后重试" }, { status: 404 });
+    }
     if (photos.some((photo) => photo.deletedAt)) {
       return Response.json({ error: "回收站中的影像不能直接移动" }, { status: 400 });
     }
@@ -86,6 +100,9 @@ export async function DELETE(request: Request) {
 
     const photos = await batchPhotos(ids);
     if (!photos) return Response.json({ error: "部分影像不存在，请刷新后重试" }, { status: 404 });
+    if (!(await photosAreVisible(photos, user))) {
+      return Response.json({ error: "部分影像不存在，请刷新后重试" }, { status: 404 });
+    }
     if (photos.some((photo) => photo.deletedAt)) {
       return Response.json({ error: "部分影像已经位于回收站" }, { status: 400 });
     }

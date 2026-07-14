@@ -30,7 +30,7 @@
 │   ├── layout.tsx               HTML 元信息和全局布局
 │   └── globals.css              Web 全局样式
 ├── lib/                         服务端领域能力和 CloudBase 适配层
-│   ├── access.ts                文件夹密码、访问令牌、上传令牌和上传票据
+│   ├── access.ts                文件夹身份可见性、超级管理员、上传令牌和上传票据
 │   ├── audit.ts                 审计日志生成与 IP 摘要
 │   ├── auth.ts                  用户密码、会话令牌和角色认证
 │   ├── cloudbase.ts             数据模型、数据库查询和云存储操作
@@ -38,7 +38,7 @@
 │   └── validation.ts            文件夹名称和 slug 生成
 ├── miniprogram/                 原生微信小程序
 │   ├── pages/login/             注册和登录
-│   ├── pages/library/           文件夹、分页浏览、解锁、新建文件夹和管理员影像上传
+│   ├── pages/library/           文件夹、身份可见性、分页浏览、新建文件夹和管理员影像上传
 │   ├── pages/viewer/            视频播放、缓冲和重试
 │   ├── utils/api.js             API、Bearer 会话和 wx.uploadFile 封装
 │   ├── app.json                 页面、导航栏和分包加载设置
@@ -58,7 +58,7 @@
 
 | 集合 | 类型 | 用途 |
 | --- | --- | --- |
-| `album_folders` | `AlbumFolder` | 文件夹名称、slug、目录顺序、创建时间和可选密码摘要 |
+| `album_folders` | `AlbumFolder` | 文件夹名称、slug、创建者、可见范围、目录顺序和创建时间 |
 | `album_photos` | `AlbumPhoto` | 媒体元数据、CloudBase `fileId`、视频封面、所属文件夹、回收站时间和最近操作人 |
 | `album_upload_tokens` | `UploadTokenRecord` | 每个文件夹当前有效的上传链接令牌摘要 |
 | `album_users` | `AlbumUser` | 本地账号、角色、状态和密码摘要 |
@@ -67,6 +67,9 @@
 关键字段约定：
 
 - `folder.slug` 是 API、URL、对象路径和关联查询使用的稳定标识；显示名称变化不应直接改 slug。
+- `folder.creatorUserId` 是文件夹创建者。创建者可修改自己创建的文件夹可见范围。
+- `folder.visibilityType` 只能是 `all`、`admins` 或 `specific`。
+- `folder.visibleUserIds` 仅在 `visibilityType="specific"` 时生效，保存可见用户 ID。
 - `folder.sortOrder` 是管理员保存的目录顺序；历史记录缺少该字段时按 `createdAt` 倒序回退。
 - `photo.fileId` 是生成临时访问地址、查询文件和删除文件的权威标识。
 - `photo.coverFileId` 是可选的视频封面文件标识；永久删除视频时必须与 `fileId` 一并删除。
@@ -74,7 +77,8 @@
 - `photo.url` 不是永久公开地址。读取列表和播放前应通过 `resolvePhotoUrls` 生成临时地址。
 - `photo.deletedAt` 和 `photo.purgeAt` 表示回收站状态；正常列表必须排除 `deletedAt` 非空的记录。
 - `photo.lastAction`、`lastActionBy`、`lastActionAt` 用于双端就近展示最近操作者；完整历史仍以 `album_audit_logs` 为准。
-- `passwordHash` 和 `tokenHash` 只保存摘要，不保存文件夹密码或上传令牌明文。
+- `folder.passwordHash` 仅用于历史数据兼容：旧记录存在该字段时按 `admins` 处理，任何 V2 可见性修改都会将其清空。
+- `tokenHash` 只保存上传令牌摘要，不保存上传令牌明文。
 
 影像列表已经使用数据库级分页：Web 每页 48 项，小程序每页 24 项；指定文件夹、全部影像和回收站分别查询。文件夹影像数量通过数据库聚合获得，不受单页数量影响。文件夹列表仍最多 100 个、用户最多 200 个、日志最多 300 条。
 
@@ -84,8 +88,10 @@
 
 用户角色只有：
 
-- `member`：默认注册角色，可浏览未加密内容；正确解锁后可浏览加密文件夹。
-- `admin`：可浏览所有文件夹和回收站，并执行创建、上传、加密、重命名、批量移动、恢复、永久删除、用户授权和日志查看。
+- `member`：默认注册角色，可浏览“所有人可见”以及明确选中自己的文件夹。
+- `admin`：可浏览“所有人可见”“管理员可见”以及明确选中自己的文件夹，并执行创建、上传、重命名、批量移动、恢复、永久删除和用户授权。
+
+`provider="admin"` 且 `role="admin"` 的 bootstrap 管理员是项目超级管理员，也就是产品中的“头儿”。超级管理员可读取所有文件夹、修改任何文件夹的可见范围，并查看完整审计日志。普通管理员即使知道文件夹 slug 或媒体 ID，也不能访问未向自己开放的内容。
 
 用户状态只有 `active` 和 `disabled`。`disabled` 用户即使持有未过期令牌也无法继续通过 `currentUser`。
 
@@ -102,30 +108,34 @@
 ### 4.3 密码和签名
 
 - 用户密码：PBKDF2-SHA256，210,000 次迭代，随机盐。
-- 文件夹密码：PBKDF2-SHA256，210,000 次迭代，随机盐。
 - 会话签名：优先使用 `ALBUM_SESSION_SECRET`，未配置时回退到 `ALBUM_ADMIN_KEY`。
-- 文件夹访问令牌和上传票据签名使用 `ALBUM_ADMIN_KEY`。
+- 上传票据签名使用 `ALBUM_ADMIN_KEY`。
 - 比较签名、密码摘要和管理员口令时使用常量时间比较。
 
-修改 `ALBUM_SESSION_SECRET` 会使现有登录会话失效；修改 `ALBUM_ADMIN_KEY` 会使现有文件夹访问令牌、上传票据和管理员应急口令失效。
+修改 `ALBUM_SESSION_SECRET` 会使现有登录会话失效；修改 `ALBUM_ADMIN_KEY` 会使现有上传票据和管理员应急口令失效。
 
-## 5. 文件夹加密规则
+## 5. 文件夹身份可见性规则
 
-加密逻辑位于 `lib/access.ts` 和 `app/api/folders/*`。
+统一规则位于 `lib/access.ts`，API 不得自行复制一套不同判断。
 
-- 管理员通过 `PATCH /api/folders` 设置或更换密码，通过 `DELETE /api/folders` 移除密码。
-- 用户通过 `POST /api/folders/unlock` 校验密码。
-- Web 解锁成功后获得 12 小时 HttpOnly Cookie。
-- 小程序解锁成功后额外获得 `accessToken`，保存到 `albumFolderTokens`，以后放在 `x-album-folder-token` 请求头中。
-- 更换文件夹密码会改变令牌版本，旧访问令牌立即失效。
-- 解锁失败限制为同一 IP 和文件夹 15 分钟内 8 次。该计数当前保存在进程内存中，多实例扩容或重启会重置；若安全要求提高，应迁移到共享存储。
+- `all`：任何已登录且状态正常的注册用户可见。
+- `admins`：普通管理员可见；成员不可见。
+- `specific`：只有 `visibleUserIds` 中的用户可见。
+- 文件夹创建者始终可见，且可修改自己创建的文件夹可见范围。
+- 项目超级管理员始终可见，且可修改任意文件夹可见范围。
+- 创建文件夹必须提交可见类型；`specific` 必须至少选择一位有效用户，并包含创建者。
+- `GET /api/users/options` 返回当前有效用户，供 Web 和小程序的简洁选择器使用。
 
 重要可见性约束：
 
-- “全部影像”始终排除所有加密文件夹内容，包括管理员视图。
-- 必须进入具体文件夹后才能查看其中内容。
-- 加密文件夹在列表中不暴露真实影像数量，`photoCount` 返回 0。
-- 新增任何“搜索、最近上传、推荐、统计”入口时，都必须重复应用该过滤规则，不能绕过 `canReadFolder`。
+- `/api/library` 先计算当前用户的可见文件夹，再返回目录、全部影像、指定文件夹和回收站结果。
+- 无权限文件夹不返回名称、数量或任何占位提示；直接请求其 slug 时统一返回“文件夹不存在”。
+- 媒体详情、临时 URL、下载、封面、重命名、移动、删除、恢复、审计事件和上传都必须调用 `canUserReadFolder` 或建立在 `canWriteFolder` 上。
+- 无权限媒体 ID 统一按“文件不存在”处理，不能通过状态码或错误文案确认资源存在。
+- 普通管理员的回收站只包含其可见文件夹；完整审计日志只允许超级管理员读取。
+- 新增搜索、通知、动态、最近上传、推荐或统计入口时，必须先应用同样过滤，不能只依赖前端隐藏。
+
+历史兼容：缺少 `visibilityType` 的旧公开文件夹按 `all` 处理；旧 `passwordHash` 非空的文件夹按 `admins` 处理。这样旧加密内容不会意外公开，也不再要求输入密码。首次修改可见范围后会写入 V2 字段并清空旧 `passwordHash`。历史文件夹没有可靠的创建者信息，因此默认只能由超级管理员修改可见范围。
 
 ## 6. 媒体存储与上传
 
@@ -172,7 +182,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 数据库只保存令牌 SHA-256 摘要；再次生成会替换该文件夹的旧令牌。
 - Web URL 使用 `?folder={slug}&upload={token}`。
 - 上传者仍必须登录，只是可以在没有管理员角色时向指定文件夹上传。
-- 令牌不能授予浏览加密文件夹、删除、重命名或其他管理能力。
+- 上传令牌只对当前用户本来就有权看到的文件夹生效，不能绕过身份可见性，也不能授予删除、重命名或其他管理能力。
 
 ## 7. 临时 URL、预览和视频
 
@@ -196,12 +206,12 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `POST /api/auth/admin` | 管理口令 | bootstrap 管理员登录 |
 | `GET/DELETE /api/auth/session` | 登录 | 读取会话或退出 |
 | `GET /api/library` | 登录 | 按文件夹分页返回可见媒体；双端支持 `limit/offset` |
-| `POST /api/folders` | admin | 创建文件夹 |
-| `PATCH /api/folders/order` | admin | 保存完整文件目录顺序 |
+| `POST /api/folders` | admin | 创建文件夹并设置可见范围 |
+| `PATCH /api/folders` | 创建者/超级管理员 | 修改文件夹可见范围 |
+| `PATCH /api/folders/order` | admin | 保存当前用户可见目录顺序，不改变隐藏目录相对位置 |
 | `PATCH /api/folders/name` | admin | 重命名文件夹，保持 slug 不变 |
-| `PATCH/DELETE /api/folders` | admin | 设置、更换或移除文件夹密码 |
-| `POST /api/folders/unlock` | 登录 | 解锁加密文件夹 |
 | `POST /api/folders/share` | admin | 生成或轮换上传链接令牌 |
+| `GET /api/users/options` | admin/文件夹创建者 | 返回有效用户，供可见范围选择器使用 |
 | `POST /api/photos/upload` | admin/上传令牌 | 生成 Web 直传信息和票据 |
 | `PATCH /api/photos/upload` | admin/上传令牌 | 确认 Web 直传并登记媒体 |
 | `POST /api/photos` | admin/上传令牌 | multipart 上传，供小程序照片和视频使用 |
@@ -212,7 +222,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `GET /api/photos/url` | 文件夹可读 | 刷新图片或视频临时地址 |
 | `POST /api/audit` | 登录 | 记录客户端预览或下载事件 |
 | `GET/PATCH /api/admin/users` | admin | 用户列表、角色和状态管理 |
-| `GET /api/admin/audit-logs` | admin | 审计日志列表 |
+| `GET /api/admin/audit-logs` | 超级管理员 | 审计日志列表 |
 | `POST /api/admin/verify` | admin | 简单管理员身份检查 |
 
 `DELETE /api/photos` 现在是软删除，不再立即删除云文件。Route Handler 的基本顺序应保持为：认证、角色或资源权限、输入校验、领域操作、审计、响应。不能只依赖界面隐藏按钮实现授权。
@@ -253,9 +263,9 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 文件夹导航、全部影像、搜索、网格/列表视图。
 - Web 每页读取 48 项，通过“加载更多”追加；标题显示数据库返回的真实总数。
 - 新建文件夹、上传、拖放、进度和上传链接。
-- 文件夹解锁、设置密码和移除密码。
+- 新建文件夹时设置可见范围，创建者或超级管理员可后续调整。
 - 图片/视频在线播放、下载、重命名、编辑模式、批量移动和 7 天回收站。
-- 管理员用户授权和审计日志 Tab。
+- 管理员用户授权；审计日志 Tab 仅超级管理员显示。
 - 旧 CloudBase Run 域名到正式域名的客户端跳转。
 
 `album-client.tsx` 当前是大型单组件。新增较复杂功能时，优先按“媒体上传、文件夹安全、管理后台、预览器”拆出组件或 hooks，但不要在没有收益时做全量重构。
@@ -273,9 +283,8 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 
 ### `miniprogram/utils/api.js`
 
-- 保存和清除会话、用户、文件夹访问令牌。
+- 保存和清除会话与用户。
 - 所有 `wx.request` 自动添加 Bearer 令牌和 `x-album-client`。
-- 加密文件夹请求按需添加 `x-album-folder-token`。
 - `uploadMedia` 封装照片/视频的 `wx.uploadFile` 和上传进度，单文件超时为 10 分钟。
 - `uploadVideoCover` 只在服务端没有成功生成封面时上传 `thumbTempFilePath`，封面失败不会重复上传原视频。
 - `generateVideoCover` 为历史视频请求服务端补生成首帧封面，超时为 2 分钟。
@@ -292,10 +301,10 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 使用 request id 防止切换文件夹时旧请求覆盖新状态。
 - 图片使用缩略图和 lazy-load，失败时回退原图。
 - Logo 旁的三横按钮打开文件目录；管理员的新建入口固定在目录顶部，并可用上下箭头持久化调整文件夹顺序。
-- 文件夹“更多”操作支持重命名、设置或更换密码、移除密码；文件夹 slug 始终保持不变。
+- 文件夹“更多”操作支持重命名和修改可见范围；文件夹 slug 始终保持不变。
 - 管理员可从影像卡片右上角重命名单项照片或视频，保存后重新加载以刷新最近操作人。
 - 新上传视频使用微信选择器返回的首帧缩略图作为列表封面，没有封面的历史视频继续显示占位状态。
-- 加密文件夹访问令牌按 slug 保存。
+- 目录和全部影像只渲染服务端返回的可见文件夹与媒体，不在客户端保留隐藏目录占位。
 - 普通成员只读；管理员可新建文件夹，选择具体文件夹后可创建最多 50 项照片/视频的上传任务。
 - 管理员编辑模式单次最多选择 100 项，支持批量移动和移入回收站。
 - 管理员回收站支持批量恢复和永久删除；影像卡片显示最近操作者。
@@ -316,7 +325,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | --- | --- |
 | `CLOUDBASE_ENV_ID` | CloudBase 环境 ID；也兼容运行时 `TCB_ENV` |
 | `CLOUDBASE_APIKEY` | 保留在环境模板中的本地凭据配置项；当前源码未直接读取 |
-| `ALBUM_ADMIN_KEY` | 管理员应急口令、文件夹访问和上传票据签名密钥 |
+| `ALBUM_ADMIN_KEY` | 管理员应急口令和上传票据签名密钥 |
 | `ALBUM_SESSION_SECRET` | 会话签名和审计 IP 摘要密钥 |
 | `ALBUM_PUBLIC_ORIGIN` | 保留的正式域名配置项；当前客户端仍使用代码中的固定域名 |
 
@@ -324,7 +333,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 
 安全约束：
 
-- `.env*`、微信代码上传私钥、会话令牌、上传令牌、文件夹密码和临时 URL 不得提交 Git。
+- `.env*`、微信代码上传私钥、会话令牌、上传令牌和临时 URL 不得提交 Git。
 - 微信代码上传私钥应保存在仓库外，只把路径传给 `miniprogram-ci`。
 - 不要在命令行输出、日志、截图或文档中粘贴密钥内容。
 - `ALBUM_SESSION_SECRET` 应和 `ALBUM_ADMIN_KEY` 使用不同的高强度随机值。
@@ -390,8 +399,7 @@ https://7061-paratrooper-battalion-d1b3b82e83-1313194650.tcb.qcloud.la
 
 - 影像列表使用数据库 `skip/limit` 分页；大量数据或高并发写入场景可进一步升级为基于 `createdAt + id` 的游标分页。
 - Web 搜索目前只过滤已经加载到浏览器的页面，不是服务端全文搜索。
-- 解锁失败限流存在单进程内存，不能跨实例共享。
-- 小程序支持管理员新建、重命名、排序和加密文件夹，支持单项文件重命名、批量移动、回收站和带首帧封面的照片/视频上传；用户授权和日志查看仍在网页管理端完成。
+- 小程序支持管理员新建、重命名、排序和设置文件夹可见范围，支持单项文件重命名、批量移动、回收站和带首帧封面的照片/视频上传；用户授权和完整日志查看仍在网页管理端完成。
 - 小程序 multipart 上传经过应用服务器，不适合大文件。
 - 云存储写入/删除与数据库记录不是事务操作；中途失败可能产生孤立对象或孤立记录，批量导入前应设计补偿和对账。
 - `album-client.tsx` 体积较大，复杂迭代前可渐进拆分。
@@ -410,7 +418,7 @@ https://7061-paratrooper-battalion-d1b3b82e83-1313194650.tcb.qcloud.la
 实现时：
 
 1. 权限判断放在服务端，客户端只负责体验。
-2. 加密内容不得从“全部影像”、搜索或统计接口泄露。
+2. 无权限内容不得从目录、“全部影像”、回收站、搜索、通知、日志或统计接口泄露。
 3. 媒体地址使用临时 URL，不建立永久公开桶。
 4. 新的修改操作和敏感读取补审计日志。
 5. 不删除线上或测试媒体，除非用户明确要求。

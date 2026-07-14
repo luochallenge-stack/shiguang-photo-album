@@ -7,9 +7,12 @@ import {
   listRecycledPhotoPage,
   purgeExpiredPhotos,
   resolvePhotoUrls,
-  type AlbumPhotoPage,
 } from "../../../lib/cloudbase";
-import { canReadFolder } from "../../../lib/access";
+import {
+  canManageFolderVisibility,
+  canUserReadFolder,
+  folderVisibilityType,
+} from "../../../lib/access";
 import { currentUser, forbidden, isMiniProgramRequest, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 
@@ -40,25 +43,28 @@ export async function GET(request: Request) {
     const requestedOffset = Number(url.searchParams.get("offset"));
     const offset = Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
     const folderRows = await listFolders();
-    const selectedFolderRow = selectedFolder ? folderRows.find((folder) => folder.slug === selectedFolder) : undefined;
-    const folderLocked = Boolean(
-      selectedFolderRow?.passwordHash && !(await canReadFolder(request, selectedFolderRow, user)),
-    );
-    const lockedSlugs = folderRows.filter((folder) => Boolean(folder.passwordHash)).map((folder) => folder.slug);
-    const emptyPage: AlbumPhotoPage = { photos: [], total: 0, offset, limit, hasMore: false };
+    const visibleFolderRows = folderRows.filter((folder) => canUserReadFolder(folder, user));
+    const visibleFolderSlugs = new Set(visibleFolderRows.map((folder) => folder.slug));
+    const hiddenFolderSlugs = folderRows
+      .filter((folder) => !visibleFolderSlugs.has(folder.slug))
+      .map((folder) => folder.slug);
+    const selectedFolderRow = selectedFolder
+      ? visibleFolderRows.find((folder) => folder.slug === selectedFolder)
+      : undefined;
+    if (selectedFolder && !selectedFolderRow) {
+      return Response.json({ error: "文件夹不存在" }, { status: 404 });
+    }
     const [page, counts, standaloneRecycleCount] = await Promise.all([
-      folderLocked
-        ? Promise.resolve(emptyPage)
-        : recycleBin
-          ? listRecycledPhotoPage({ offset, limit })
-          : listPhotoPage({
-              folderSlug: selectedFolder,
-              excludedFolderSlugs: selectedFolder ? [] : lockedSlugs,
-              offset,
-              limit,
-            }),
+      recycleBin
+        ? listRecycledPhotoPage({ excludedFolderSlugs: hiddenFolderSlugs, offset, limit })
+        : listPhotoPage({
+            folderSlug: selectedFolder,
+            excludedFolderSlugs: selectedFolder ? [] : hiddenFolderSlugs,
+            offset,
+            limit,
+          }),
       countActivePhotosByFolder(),
-      recycleBin ? Promise.resolve<number | null>(null) : countRecycledPhotos(),
+      recycleBin ? Promise.resolve<number | null>(null) : countRecycledPhotos(hiddenFolderSlugs),
     ]);
     const photoRows = page.photos;
     const recycleCount = standaloneRecycleCount ?? page.total;
@@ -72,19 +78,26 @@ export async function GET(request: Request) {
       resourceType: recycleBin ? "recycle-bin" : selectedFolder ? "folder" : "album",
       resourceId: selectedFolderRow?.id || "",
       resourceName: recycleBin ? "回收站" : selectedFolderRow?.name || "全部影像",
-      metadata: { folderSlug: recycleBin ? "recycle" : selectedFolder || "all", locked: folderLocked },
+      metadata: { folderSlug: recycleBin ? "recycle" : selectedFolder || "all" },
     });
 
     return Response.json({
-      folders: folderRows.map((folder) => ({
-        id: folder.id,
-        name: folder.name,
-        slug: folder.slug,
-        createdAt: folder.createdAt,
-        sortOrder: folder.sortOrder,
-        locked: Boolean(folder.passwordHash),
-        photoCount: folder.passwordHash ? 0 : counts[folder.slug] || 0,
-      })),
+      folders: visibleFolderRows.map((folder) => {
+        const canManageVisibility = canManageFolderVisibility(folder, user);
+        const visibilityType = folderVisibilityType(folder);
+        return {
+          id: folder.id,
+          name: folder.name,
+          slug: folder.slug,
+          createdAt: folder.createdAt,
+          sortOrder: folder.sortOrder,
+          creatorUserId: canManageVisibility ? folder.creatorUserId || "" : "",
+          visibilityType,
+          visibleUserIds: canManageVisibility && visibilityType === "specific" ? folder.visibleUserIds || [] : [],
+          canManageVisibility,
+          photoCount: counts[folder.slug] || 0,
+        };
+      }),
       photos: photoRows.map((photo, index) => {
         const resolvedUrl = resolvedUrls[index] || photo.url;
         const coverUrl = coverUrls.get(photo.id) || "";
@@ -103,7 +116,6 @@ export async function GET(request: Request) {
       recycleCount,
       recycleBin,
       storageConfigured: cloudBaseIsConfigured(),
-      folderLocked,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "读取相册失败";

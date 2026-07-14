@@ -1,5 +1,7 @@
 import { currentUser, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
+import { canUserReadFolder } from "../../../lib/access";
+import { findFolder, findPhoto } from "../../../lib/cloudbase";
 
 const ALLOWED_ACTIONS = new Set(["media.view", "media.download"]);
 
@@ -15,12 +17,18 @@ export async function POST(request: Request) {
     };
     const action = typeof body.action === "string" ? body.action : "";
     if (!ALLOWED_ACTIONS.has(action)) return Response.json({ error: "无效的审计事件" }, { status: 400 });
+    const resourceId = typeof body.resourceId === "string" ? body.resourceId.trim() : "";
+    const photo = resourceId ? await findPhoto(resourceId) : null;
+    const folder = photo ? await findFolder(photo.folderSlug) : null;
+    if (!photo || !folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "文件不存在" }, { status: 404 });
+    }
     await recordAudit(request, user, {
       action,
       resourceType: "media",
-      resourceId: typeof body.resourceId === "string" ? body.resourceId : "",
-      resourceName: typeof body.resourceName === "string" ? body.resourceName : "",
-      metadata: { folderSlug: typeof body.folderSlug === "string" ? body.folderSlug : "" },
+      resourceId: photo.id,
+      resourceName: photo.name,
+      metadata: { folderSlug: photo.folderSlug },
     });
     return Response.json({ ok: true });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { findFolder, updateFolderName } from "../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 import { normalizeFolderName } from "../../../../lib/validation";
@@ -14,7 +15,9 @@ export async function PATCH(request: Request) {
     if (!folderSlug || !name) return Response.json({ error: "文件夹名称不能为空" }, { status: 400 });
 
     const folder = await findFolder(folderSlug);
-    if (!folder) return Response.json({ error: "文件夹不存在" }, { status: 404 });
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "文件夹不存在" }, { status: 404 });
+    }
     if (folder.name === name) return Response.json({ folder: { ...folder, name } });
 
     await updateFolderName(folder.id, name);

@@ -1,4 +1,5 @@
 import { listFolders, updateFolderSortOrders } from "../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
@@ -24,11 +25,17 @@ export async function PATCH(request: Request) {
 
     const folders = await listFolders();
     const folderBySlug = new Map(folders.map((folder) => [folder.slug, folder]));
-    if (slugs.length !== folders.length || slugs.some((slug) => !folderBySlug.has(slug))) {
+    const visibleFolders = folders.filter((folder) => canUserReadFolder(folder, user));
+    const visibleSlugs = new Set(visibleFolders.map((folder) => folder.slug));
+    if (slugs.length !== visibleFolders.length || slugs.some((slug) => !visibleSlugs.has(slug))) {
       return Response.json({ error: "文件夹列表已经变化，请刷新后重试" }, { status: 409 });
     }
 
-    await updateFolderSortOrders(slugs.map((slug) => folderBySlug.get(slug)!.id));
+    let visibleIndex = 0;
+    const mergedOrder = folders.map((folder) => (
+      visibleSlugs.has(folder.slug) ? folderBySlug.get(slugs[visibleIndex++])! : folder
+    ));
+    await updateFolderSortOrders(mergedOrder.map((folder) => folder.id));
     await recordAudit(request, user, {
       action: "folder.reorder",
       resourceType: "folder-list",

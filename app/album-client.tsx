@@ -14,9 +14,6 @@ import {
   Images,
   LayoutList,
   Link2,
-  KeyRound,
-  LockKeyhole,
-  LockOpen,
   LoaderCircle,
   LogOut,
   Maximize2,
@@ -37,7 +34,7 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useSta
 import NextImage from "next/image";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
 import type { PublicAlbumUser } from "@/lib/auth";
-import type { AlbumAuditLog } from "@/lib/cloudbase";
+import type { AlbumAuditLog, FolderVisibilityType } from "@/lib/cloudbase";
 
 const PUBLIC_ALBUM_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const LEGACY_ALBUM_HOST = "sanbing-4108035-1313194650.ap-shanghai.run.tcloudbase.com";
@@ -50,7 +47,10 @@ type FolderItem = {
   slug: string;
   photoCount: number;
   createdAt: string;
-  locked: boolean;
+  creatorUserId: string;
+  visibilityType: FolderVisibilityType;
+  visibleUserIds: string[];
+  canManageVisibility: boolean;
 };
 
 type PhotoItem = {
@@ -86,7 +86,6 @@ type LibraryResponse = {
   nextOffset: number;
   hasMore: boolean;
   storageConfigured: boolean;
-  folderLocked: boolean;
   recycleCount: number;
   recycleBin: boolean;
 };
@@ -147,16 +146,97 @@ const ACTION_LABELS: Record<string, string> = {
   "media.purge.batch": "永久删除影像",
   "recycle.view": "查看回收站",
   "folder.create": "创建文件夹",
-  "folder.unlock": "解锁文件夹",
-  "folder.unlock.failed": "解锁失败",
-  "folder.password.set": "加密文件夹",
-  "folder.password.change": "更换文件夹密码",
-  "folder.password.remove": "移除文件夹密码",
+  "folder.visibility.update": "修改可见范围",
   "folder.share.create": "生成上传链接",
   "user.access.update": "修改用户权限",
   "admin.users.view": "查看用户管理",
   "admin.logs.view": "查看操作日志",
 };
+
+const VISIBILITY_OPTIONS: Array<{
+  type: FolderVisibilityType;
+  title: string;
+  description: string;
+}> = [
+  { type: "all", title: "所有人可见", description: "任何已注册用户都能看到" },
+  { type: "admins", title: "管理员可见", description: "只对管理员展示" },
+  { type: "specific", title: "某些人可见", description: "仅向勾选的用户展示" },
+];
+
+function visibilityLabel(type: FolderVisibilityType): string {
+  if (type === "admins") return "管理员可见";
+  if (type === "specific") return "指定用户可见";
+  return "所有人可见";
+}
+
+function VisibilityFields({
+  visibilityType,
+  selectedUserIds,
+  users,
+  requiredUserId,
+  disabled,
+  onVisibilityTypeChange,
+  onSelectedUserIdsChange,
+}: {
+  visibilityType: FolderVisibilityType;
+  selectedUserIds: string[];
+  users: PublicAlbumUser[];
+  requiredUserId: string;
+  disabled: boolean;
+  onVisibilityTypeChange: (type: FolderVisibilityType) => void;
+  onSelectedUserIdsChange: (ids: string[]) => void;
+}) {
+  const chooseType = (type: FolderVisibilityType) => {
+    onVisibilityTypeChange(type);
+    if (type === "specific" && requiredUserId && !selectedUserIds.includes(requiredUserId)) {
+      onSelectedUserIdsChange([...selectedUserIds, requiredUserId]);
+    }
+  };
+  const toggleUser = (userId: string) => {
+    if (userId === requiredUserId) return;
+    onSelectedUserIdsChange(selectedUserIds.includes(userId)
+      ? selectedUserIds.filter((id) => id !== userId)
+      : [...selectedUserIds, userId]);
+  };
+  return (
+    <div className="visibility-editor">
+      <span className="field-label">可见范围</span>
+      <div className="visibility-options" role="radiogroup" aria-label="文件夹可见范围">
+        {VISIBILITY_OPTIONS.map((option) => (
+          <button
+            key={option.type}
+            type="button"
+            className={visibilityType === option.type ? "active" : ""}
+            role="radio"
+            aria-checked={visibilityType === option.type}
+            disabled={disabled}
+            onClick={() => chooseType(option.type)}
+          >
+            <strong>{option.title}</strong>
+            <span>{option.description}</span>
+          </button>
+        ))}
+      </div>
+      {visibilityType === "specific" && (
+        <div className="visibility-users" aria-label="选择可见用户">
+          {users.map((user) => (
+            <label key={user.id}>
+              <input
+                type="checkbox"
+                checked={selectedUserIds.includes(user.id)}
+                disabled={disabled || user.id === requiredUserId}
+                onChange={() => toggleUser(user.id)}
+              />
+              <span><strong>{user.displayName}</strong><small>{user.accountLabel}</small></span>
+              <b>{user.role === "admin" ? "管理员" : "成员"}</b>
+            </label>
+          ))}
+          {!users.length && <p>正在读取用户列表...</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function downloadUrl(url: string, filename: string): string {
   const separator = url.includes("?") ? "&" : "?";
@@ -316,6 +396,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [dragging, setDragging] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderVisibility, setNewFolderVisibility] = useState<FolderVisibilityType>("admins");
+  const [newFolderVisibleUserIds, setNewFolderVisibleUserIds] = useState<string[]>([initialUser.id]);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [preview, setPreview] = useState<PhotoItem | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
@@ -338,15 +420,15 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [batchTargetFolder, setBatchTargetFolder] = useState("");
   const [batchSaving, setBatchSaving] = useState(false);
-  const [folderLocked, setFolderLocked] = useState(false);
-  const [unlockPassword, setUnlockPassword] = useState("");
-  const [unlockingFolder, setUnlockingFolder] = useState(false);
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const [securityPassword, setSecurityPassword] = useState("");
-  const [savingSecurity, setSavingSecurity] = useState(false);
+  const [visibilityUsers, setVisibilityUsers] = useState<PublicAlbumUser[]>([]);
+  const [visibilityOpen, setVisibilityOpen] = useState(false);
+  const [folderVisibility, setFolderVisibility] = useState<FolderVisibilityType>("admins");
+  const [folderVisibleUserIds, setFolderVisibleUserIds] = useState<string[]>([]);
+  const [savingVisibility, setSavingVisibility] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const libraryRequestId = useRef(0);
   const isAdmin = initialUser.role === "admin";
+  const isSuperAdmin = initialUser.provider === "admin" && isAdmin;
 
   const adminHeaders = (contentType = false): Record<string, string> => ({
     ...(contentType ? { "content-type": "application/json" } : {}),
@@ -375,7 +457,6 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
       setNextOffset(Number(data.nextOffset) || 0);
       setHasMore(Boolean(data.hasMore));
       setStorageConfigured(data.storageConfigured);
-      setFolderLocked(data.folderLocked);
       setRecycleCount(data.recycleCount || 0);
     } catch (cause) {
       if (requestId !== libraryRequestId.current) return;
@@ -437,8 +518,6 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     setSelectedPhotoIds([]);
     setBatchMoveOpen(false);
     setBatchDeleteOpen(false);
-    setFolderLocked(false);
-    setUnlockPassword("");
     setSelectedFolder(slug);
     const url = new URL(window.location.href);
     if (slug) url.searchParams.set("folder", slug);
@@ -453,7 +532,6 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     setSelectedFolder("");
     setPhotos([]);
     setPreview(null);
-    setFolderLocked(false);
     setEditMode(false);
     setSelectedPhotoIds([]);
     setBatchMoveOpen(false);
@@ -462,6 +540,24 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     url.searchParams.delete("folder");
     window.history.replaceState({}, "", url);
     void loadLibrary("", true);
+  };
+
+  const loadVisibilityUsers = async (folderSlug = "") => {
+    if (visibilityUsers.length) return visibilityUsers;
+    const query = folderSlug ? `?folder=${encodeURIComponent(folderSlug)}` : "";
+    const result = await readJson<{ users: PublicAlbumUser[] }>(await fetch(`/api/users/options${query}`));
+    setVisibilityUsers(result.users);
+    return result.users;
+  };
+
+  const openNewFolder = () => {
+    setNewFolderName("");
+    setNewFolderVisibility("admins");
+    setNewFolderVisibleUserIds([initialUser.id]);
+    setNewFolderOpen(true);
+    void loadVisibilityUsers().catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "读取用户列表失败");
+    });
   };
 
   const createFolder = async () => {
@@ -473,7 +569,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         await fetch("/api/folders", {
           method: "POST",
           headers: adminHeaders(true),
-          body: JSON.stringify({ name: newFolderName }),
+          body: JSON.stringify({
+            name: newFolderName,
+            visibilityType: newFolderVisibility,
+            visibleUserIds: newFolderVisibleUserIds,
+          }),
         }),
       );
       setFolders((current) => [result.folder, ...current]);
@@ -582,67 +682,38 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     }
   };
 
-  const unlockFolder = async () => {
-    if (!selectedFolder || !unlockPassword) return;
-    setUnlockingFolder(true);
-    setError("");
-    try {
-      await readJson<{ ok: boolean }>(
-        await fetch("/api/folders/unlock", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ folderSlug: selectedFolder, password: unlockPassword }),
-        }),
-      );
-      setUnlockPassword("");
-      await loadLibrary(selectedFolder);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "解锁文件夹失败");
-    } finally {
-      setUnlockingFolder(false);
-    }
+  const openFolderVisibility = () => {
+    if (!activeFolder?.canManageVisibility) return;
+    setFolderVisibility(activeFolder.visibilityType);
+    setFolderVisibleUserIds(activeFolder.visibleUserIds);
+    setVisibilityOpen(true);
+    void loadVisibilityUsers(activeFolder.slug).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "读取用户列表失败");
+    });
   };
 
-  const saveFolderPassword = async () => {
-    if (!selectedFolder || securityPassword.length < 4) return;
-    setSavingSecurity(true);
+  const saveFolderVisibility = async () => {
+    if (!selectedFolder || !activeFolder?.canManageVisibility) return;
+    setSavingVisibility(true);
     setError("");
     try {
       await readJson<{ ok: boolean }>(
         await fetch("/api/folders", {
           method: "PATCH",
           headers: adminHeaders(true),
-          body: JSON.stringify({ folderSlug: selectedFolder, password: securityPassword }),
+          body: JSON.stringify({
+            folderSlug: selectedFolder,
+            visibilityType: folderVisibility,
+            visibleUserIds: folderVisibleUserIds,
+          }),
         }),
       );
-      setSecurityPassword("");
-      setSecurityOpen(false);
+      setVisibilityOpen(false);
       await loadLibrary(selectedFolder);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "设置文件夹密码失败");
+      setError(cause instanceof Error ? cause.message : "设置文件夹可见范围失败");
     } finally {
-      setSavingSecurity(false);
-    }
-  };
-
-  const removeFolderPassword = async () => {
-    if (!selectedFolder) return;
-    setSavingSecurity(true);
-    setError("");
-    try {
-      await readJson<{ ok: boolean }>(
-        await fetch(`/api/folders?folderSlug=${encodeURIComponent(selectedFolder)}`, {
-          method: "DELETE",
-          headers: adminHeaders(),
-        }),
-      );
-      setSecurityPassword("");
-      setSecurityOpen(false);
-      await loadLibrary(selectedFolder);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "移除文件夹密码失败");
-    } finally {
-      setSavingSecurity(false);
+      setSavingVisibility(false);
     }
   };
 
@@ -835,6 +906,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
 
   const loadAdminData = async (section: AdminSection = adminSection) => {
     if (!isAdmin) return;
+    if (section === "logs" && !isSuperAdmin) return;
     setAdminLoading(true);
     setError("");
     try {
@@ -853,12 +925,14 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   };
 
   const openAdminView = (section: AdminSection = "users") => {
+    const nextSection = section === "logs" && !isSuperAdmin ? "users" : section;
     setActiveView("admin");
-    setAdminSection(section);
-    void loadAdminData(section);
+    setAdminSection(nextSection);
+    void loadAdminData(nextSection);
   };
 
   const switchAdminSection = (section: AdminSection) => {
+    if (section === "logs" && !isSuperAdmin) return;
     setAdminSection(section);
     void loadAdminData(section);
   };
@@ -895,7 +969,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           <div className="nav-heading">
             <span>文件夹</span>
             {isAdmin && (
-              <button className="icon-button inverse" onClick={() => setNewFolderOpen(true)} title="新建文件夹" aria-label="新建文件夹">
+              <button className="icon-button inverse" onClick={openNewFolder} title="新建文件夹" aria-label="新建文件夹">
                 <Plus size={17} />
               </button>
             )}
@@ -910,12 +984,15 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               key={folder.id}
               className={`folder-row ${!showRecycleBin && selectedFolder === folder.slug ? "active" : ""}`}
               onClick={() => chooseFolder(folder.slug)}
+              title={visibilityLabel(folder.visibilityType)}
             >
-              {folder.locked
-                ? <LockKeyhole size={18} />
-                : selectedFolder === folder.slug ? <FolderOpen size={18} /> : <Folder size={18} />}
+              {folder.visibilityType === "admins"
+                ? <Users size={18} />
+                : folder.visibilityType === "specific"
+                  ? <UserRound size={18} />
+                  : selectedFolder === folder.slug ? <FolderOpen size={18} /> : <Folder size={18} />}
               <span>{folder.name}</span>
-              <b>{folder.locked ? <LockKeyhole size={13} aria-label="已加密" /> : folder.photoCount}</b>
+              <b>{folder.photoCount}</b>
             </button>
           ))}
           {isAdmin && (
@@ -928,7 +1005,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           {isAdmin && (
             <button className={`folder-row admin-nav-row ${activeView === "admin" ? "active" : ""}`} onClick={() => openAdminView("users")}>
               <Users size={18} />
-              <span>用户与日志</span>
+              <span>{isSuperAdmin ? "用户与日志" : "用户管理"}</span>
               <ShieldCheck size={14} />
             </button>
           )}
@@ -979,13 +1056,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 {copiedUpload ? "已复制" : "上传链接"}
               </button>
             )}
-            {selectedFolder && isAdmin && (
+            {selectedFolder && activeFolder?.canManageVisibility && (
               <button
                 className="secondary-button"
-                onClick={() => { setSecurityPassword(""); setSecurityOpen(true); }}
+                onClick={openFolderVisibility}
               >
-                <LockKeyhole size={17} />
-                {activeFolder?.locked ? "更换密码" : "设置密码"}
+                <ShieldCheck size={17} />
+                可见范围
               </button>
             )}
             {!showRecycleBin && <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
@@ -1024,15 +1101,13 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
           <div className="section-heading">
             <div>
               <h1>{showRecycleBin ? "回收站" : activeFolder?.name || "全部影像"}</h1>
-              <p>{folderLocked
-                ? "需要密码访问"
-                : editMode
+              <p>{editMode
                   ? `已选择 ${selectedPhotoIds.length} 项`
                   : search.trim()
                     ? `当前已加载内容中找到 ${visiblePhotos.length} 项 · 共 ${total} 项`
                     : `${total} 项影像`}</p>
             </div>
-            {!folderLocked && <div className="section-controls">
+            <div className="section-controls">
               {isAdmin && visiblePhotos.length > 0 && (
                 <button className={`secondary-button edit-mode-button ${editMode ? "active" : ""}`} onClick={() => editMode ? leaveEditMode() : setEditMode(true)}>
                   {editMode ? <X size={16} /> : <Pencil size={16} />}
@@ -1043,7 +1118,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
                 <button className={viewMode === "grid" ? "active" : ""} onClick={() => setViewMode("grid")} title="网格视图" aria-label="网格视图"><Grid2X2 size={17} /></button>
                 <button className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")} title="列表视图" aria-label="列表视图"><LayoutList size={18} /></button>
               </div>
-            </div>}
+            </div>
           </div>
 
           {editMode && (
@@ -1093,28 +1168,6 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
 
           {loading ? (
             <div className="loading-state"><LoaderCircle className="spin" size={25} /> 正在读取影像</div>
-          ) : folderLocked ? (
-            <section className="locked-state" aria-labelledby="locked-folder-title">
-              <span className="lock-visual"><LockKeyhole size={30} /></span>
-              <h2 id="locked-folder-title">这个文件夹已加密</h2>
-              <p>输入密码后即可查看和下载其中的照片与视频。</p>
-              <form className="unlock-form" onSubmit={(event) => { event.preventDefault(); void unlockFolder(); }}>
-                <input
-                  className="text-input"
-                  type="password"
-                  value={unlockPassword}
-                  onChange={(event) => setUnlockPassword(event.target.value)}
-                  autoComplete="current-password"
-                  placeholder="文件夹密码"
-                  aria-label="文件夹密码"
-                  autoFocus
-                />
-                <button className="primary-button" type="submit" disabled={!unlockPassword || unlockingFolder}>
-                  {unlockingFolder ? <LoaderCircle className="spin" size={17} /> : <KeyRound size={17} />}
-                  解锁
-                </button>
-              </form>
-            </section>
           ) : photos.length ? (
             <>
             {visiblePhotos.length ? (
@@ -1183,7 +1236,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <h2>{showRecycleBin ? "回收站是空的" : selectedFolder ? "这个文件夹还是空的" : "还没有影像"}</h2>
               <p>{showRecycleBin ? "删除的影像会在这里保留 7 天。" : selectedFolder ? "添加第一批照片或视频，影像会按时间自动排列。" : "新建一个文件夹，开始整理你的照片与视频。"}</p>
               {!showRecycleBin && (canUpload || isAdmin) && (
-                <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : setNewFolderOpen(true)}>
+                <button className="primary-button" onClick={() => canUpload ? fileInput.current?.click() : openNewFolder()}>
                   {canUpload ? <Upload size={18} /> : <Plus size={18} />}
                   {canUpload ? "上传影像" : "新建文件夹"}
                 </button>
@@ -1219,15 +1272,17 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             <div className="admin-page-heading">
               <div>
                 <h1>相册管理</h1>
-                <p>成员身份、访问状态和审计记录仅对管理员可见。</p>
+                <p>{isSuperAdmin ? "成员身份、访问状态和审计记录仅对头儿可见。" : "在这里管理成员身份和访问状态。"}</p>
               </div>
-              <div className="admin-tabs" role="tablist" aria-label="管理视图">
+              <div className={`admin-tabs ${isSuperAdmin ? "" : "single"}`} role="tablist" aria-label="管理视图">
                 <button className={adminSection === "users" ? "active" : ""} onClick={() => switchAdminSection("users")} role="tab">
                   <Users size={17} /> 用户
                 </button>
-                <button className={adminSection === "logs" ? "active" : ""} onClick={() => switchAdminSection("logs")} role="tab">
-                  <Activity size={17} /> 日志
-                </button>
+                {isSuperAdmin && (
+                  <button className={adminSection === "logs" ? "active" : ""} onClick={() => switchAdminSection("logs")} role="tab">
+                    <Activity size={17} /> 日志
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1320,9 +1375,22 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             </div>
             <label className="field-label" htmlFor="folder-name">文件夹名称</label>
             <input id="folder-name" className="text-input" autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createFolder(); }} placeholder="例如：2026 / 杭州旅行" />
+            <VisibilityFields
+              visibilityType={newFolderVisibility}
+              selectedUserIds={newFolderVisibleUserIds}
+              users={visibilityUsers}
+              requiredUserId={initialUser.id}
+              disabled={creatingFolder}
+              onVisibilityTypeChange={setNewFolderVisibility}
+              onSelectedUserIdsChange={setNewFolderVisibleUserIds}
+            />
             <div className="dialog-actions">
               <button className="secondary-button" onClick={() => setNewFolderOpen(false)}>取消</button>
-              <button className="primary-button" disabled={!newFolderName.trim() || creatingFolder} onClick={() => void createFolder()}>
+              <button
+                className="primary-button"
+                disabled={!newFolderName.trim() || creatingFolder || (newFolderVisibility === "specific" && !newFolderVisibleUserIds.length)}
+                onClick={() => void createFolder()}
+              >
                 {creatingFolder ? <LoaderCircle className="spin" size={17} /> : <Plus size={17} />} 创建
               </button>
             </div>
@@ -1330,43 +1398,35 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
         </div>
       )}
 
-      {securityOpen && activeFolder && (
-        <div className="modal-backdrop" onMouseDown={() => !savingSecurity && setSecurityOpen(false)}>
-          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="folder-security-title">
+      {visibilityOpen && activeFolder && (
+        <div className="modal-backdrop" onMouseDown={() => !savingVisibility && setVisibilityOpen(false)}>
+          <section className="dialog visibility-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="folder-visibility-title">
             <div className="dialog-heading">
               <div>
-                <span className="dialog-icon"><LockKeyhole size={19} /></span>
-                <h2 id="folder-security-title">{activeFolder.locked ? "更换文件夹密码" : "设置文件夹密码"}</h2>
+                <span className="dialog-icon"><ShieldCheck size={19} /></span>
+                <h2 id="folder-visibility-title">「{activeFolder.name}」的可见范围</h2>
               </div>
-              <button className="icon-button" disabled={savingSecurity} onClick={() => setSecurityOpen(false)} aria-label="关闭"><X size={18} /></button>
+              <button className="icon-button" disabled={savingVisibility} onClick={() => setVisibilityOpen(false)} aria-label="关闭"><X size={18} /></button>
             </div>
-            <p className="dialog-message security-message">
-              加锁后，文件夹中的照片和视频不会出现在全部影像中，访问该文件夹需要输入密码。
-            </p>
-            <label className="field-label" htmlFor="folder-password">{activeFolder.locked ? "新密码" : "文件夹密码"}</label>
-            <input
-              id="folder-password"
-              className="text-input"
-              type="password"
-              minLength={4}
-              maxLength={128}
-              autoFocus
-              autoComplete="new-password"
-              value={securityPassword}
-              onChange={(event) => setSecurityPassword(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") void saveFolderPassword(); }}
-              placeholder="至少 4 个字符"
+            <p className="dialog-message security-message">没有权限的人不会在目录、全部影像或搜索结果中看到这个文件夹及其内容。</p>
+            <VisibilityFields
+              visibilityType={folderVisibility}
+              selectedUserIds={folderVisibleUserIds}
+              users={visibilityUsers}
+              requiredUserId={activeFolder.creatorUserId}
+              disabled={savingVisibility}
+              onVisibilityTypeChange={setFolderVisibility}
+              onSelectedUserIdsChange={setFolderVisibleUserIds}
             />
-            <div className="dialog-actions security-actions">
-              {activeFolder.locked && (
-                <button className="secondary-button remove-lock-button" disabled={savingSecurity} onClick={() => void removeFolderPassword()}>
-                  <LockOpen size={17} /> 移除密码
-                </button>
-              )}
-              <button className="secondary-button" disabled={savingSecurity} onClick={() => setSecurityOpen(false)}>取消</button>
-              <button className="primary-button" disabled={securityPassword.length < 4 || savingSecurity} onClick={() => void saveFolderPassword()}>
-                {savingSecurity ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />}
-                {activeFolder.locked ? "更换密码" : "加密文件夹"}
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={savingVisibility} onClick={() => setVisibilityOpen(false)}>取消</button>
+              <button
+                className="primary-button"
+                disabled={savingVisibility || (folderVisibility === "specific" && !folderVisibleUserIds.length)}
+                onClick={() => void saveFolderVisibility()}
+              >
+                {savingVisibility ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />}
+                保存
               </button>
             </div>
           </section>
@@ -1420,7 +1480,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             <p className="dialog-message security-message">选择目标文件夹，照片和视频会保留原名称与拍摄信息。</p>
             <label className="field-label" htmlFor="batch-target-folder">目标文件夹</label>
             <select id="batch-target-folder" className="text-input folder-select" value={batchTargetFolder} disabled={batchSaving} onChange={(event) => setBatchTargetFolder(event.target.value)}>
-              {moveTargets.map((folder) => <option key={folder.id} value={folder.slug}>{folder.name}{folder.locked ? "（已加密）" : ""}</option>)}
+              {moveTargets.map((folder) => <option key={folder.id} value={folder.slug}>{folder.name}（{visibilityLabel(folder.visibilityType)}）</option>)}
             </select>
             <div className="dialog-actions">
               <button className="secondary-button" disabled={batchSaving} onClick={() => setBatchMoveOpen(false)}>取消</button>

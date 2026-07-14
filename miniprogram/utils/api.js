@@ -1,7 +1,6 @@
 const API_BASE = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
 const TOKEN_KEY = "albumSessionToken";
 const USER_KEY = "albumCurrentUser";
-const FOLDER_TOKENS_KEY = "albumFolderTokens";
 
 function getSessionToken() {
   return wx.getStorageSync(TOKEN_KEY) || "";
@@ -15,7 +14,7 @@ function saveSession(sessionToken, user) {
 function clearSession() {
   wx.removeStorageSync(TOKEN_KEY);
   wx.removeStorageSync(USER_KEY);
-  wx.removeStorageSync(FOLDER_TOKENS_KEY);
+  wx.removeStorageSync("albumFolderTokens");
 }
 
 function currentUser() {
@@ -28,7 +27,6 @@ function request(path, options = {}) {
     "content-type": "application/json",
     "x-album-client": "miniprogram",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options.folderToken ? { "x-album-folder-token": options.folderToken } : {}),
   };
 
   return new Promise((resolve, reject) => {
@@ -117,7 +115,6 @@ function authenticate(mode, data) {
 
 module.exports = {
   API_BASE,
-  FOLDER_TOKENS_KEY,
   authenticate,
   clearSession,
   currentUser,

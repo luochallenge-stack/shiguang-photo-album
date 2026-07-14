@@ -6,7 +6,9 @@ import {
   mediaFileIds,
   restorePhotoRecord,
   type AlbumPhoto,
+  type AlbumUser,
 } from "../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 
@@ -25,6 +27,13 @@ async function recycledPhotos(ids: string[]): Promise<AlbumPhoto[] | null> {
   const photos = await Promise.all(ids.map((id) => findPhoto(id)));
   if (photos.some((photo) => !photo || !photo.deletedAt)) return null;
   return photos as AlbumPhoto[];
+}
+
+async function photosAreVisible(photos: AlbumPhoto[], user: AlbumUser): Promise<boolean> {
+  const folders = await Promise.all(
+    [...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolder(slug)),
+  );
+  return folders.every((folder) => Boolean(folder && canUserReadFolder(folder, user)));
 }
 
 function validateIds(ids: string[]): Response | null {
@@ -46,6 +55,9 @@ export async function PATCH(request: Request) {
     if (invalid) return invalid;
     const photos = await recycledPhotos(ids);
     if (!photos) return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
+    if (!(await photosAreVisible(photos, user))) {
+      return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
+    }
     const folders = await Promise.all([...new Set(photos.map((photo) => photo.folderSlug))].map((slug) => findFolder(slug)));
     if (folders.some((folder) => !folder)) return Response.json({ error: "原文件夹不存在，暂时无法恢复" }, { status: 409 });
 
@@ -75,6 +87,9 @@ export async function DELETE(request: Request) {
     if (invalid) return invalid;
     const photos = await recycledPhotos(ids);
     if (!photos) return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
+    if (!(await photosAreVisible(photos, user))) {
+      return Response.json({ error: "部分影像不在回收站，请刷新后重试" }, { status: 404 });
+    }
 
     await deletePhotoFiles(mediaFileIds(photos));
     await Promise.all(photos.map((photo) => deletePhotoRecord(photo.id)));

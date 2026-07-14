@@ -39,6 +39,12 @@ function operationLabel(photo) {
   return `${photo.lastActionBy} ${labels[photo.lastAction] || "操作"}`;
 }
 
+function visibilityLabel(type) {
+  if (type === "admins") return "管理员";
+  if (type === "specific") return "指定用户";
+  return "所有人";
+}
+
 function isVideoFile(file) {
   if (file && file.fileType === "video") return true;
   return /\.(mp4|mov|m4v|webm|mpeg|mpg)(?:\?|$)/i.test(String(file && file.tempFilePath || ""));
@@ -100,10 +106,6 @@ Page({
     hasMore: false,
     nextOffset: 0,
     error: "",
-    unlockOpen: false,
-    unlockPassword: "",
-    pendingFolder: null,
-    unlocking: false,
     uploading: false,
     uploadProgress: 0,
     uploadLabel: "",
@@ -114,6 +116,8 @@ Page({
     selectedVideoCount: 0,
     createFolderOpen: false,
     newFolderName: "",
+    newFolderVisibility: "admins",
+    newFolderVisibleUserIds: [],
     creatingFolder: false,
     folderMenuOpen: false,
     reorderingFolders: false,
@@ -123,10 +127,12 @@ Page({
     renameTarget: null,
     renameMaxLength: 80,
     renaming: false,
-    folderPasswordOpen: false,
-    folderPassword: "",
+    folderVisibilityOpen: false,
+    folderVisibility: "admins",
+    folderVisibleUserIds: [],
+    visibilityUsers: [],
     managedFolder: null,
-    folderSecuritySaving: false,
+    folderVisibilitySaving: false,
     editMode: false,
     batchSelectedCount: 0,
     allLoadedSelected: false,
@@ -164,7 +170,6 @@ Page({
 
   loadLibrary(folderSlug = "", refreshing = false, append = false, recycleMode = false) {
     if (append && (!this.data.hasMore || this.data.loadingMore)) return;
-    const folderTokens = wx.getStorageSync(api.FOLDER_TOKENS_KEY) || {};
     const offset = append ? this.data.nextOffset : 0;
     const requestId = ++libraryRequestId;
     this.setData({
@@ -175,18 +180,14 @@ Page({
     const query = [`limit=${PAGE_SIZE}`, `offset=${offset}`];
     if (recycleMode) query.push("recycle=1");
     else if (folderSlug) query.push(`folder=${encodeURIComponent(folderSlug)}`);
-    api.request(`/api/library?${query.join("&")}`, {
-      folderToken: folderTokens[folderSlug] || "",
-    })
+    api.request(`/api/library?${query.join("&")}`)
       .then((payload) => {
         if (requestId !== libraryRequestId) return;
-        const selected = payload.folders.find((folder) => folder.slug === folderSlug);
-        if (payload.folderLocked && selected) {
-          delete folderTokens[folderSlug];
-          wx.setStorageSync(api.FOLDER_TOKENS_KEY, folderTokens);
-          this.openUnlock(selected);
-          return;
-        }
+        const folders = payload.folders.map((folder) => ({
+          ...folder,
+          visibilityLabel: visibilityLabel(folder.visibilityType),
+        }));
+        const selected = folders.find((folder) => folder.slug === folderSlug);
         const photos = payload.photos.map((photo) => {
           const video = String(photo.mimeType || "").startsWith("video/");
           return {
@@ -204,7 +205,7 @@ Page({
         });
         const nextPhotos = append ? this.data.photos.concat(photos) : photos;
         this.setData({
-          folders: payload.folders,
+          folders,
           photos: nextPhotos,
           total: Number(payload.total) || 0,
           selectedFolder: folderSlug,
@@ -213,9 +214,6 @@ Page({
           loadingMore: false,
           hasMore: Boolean(payload.hasMore),
           nextOffset: Number(payload.nextOffset) || 0,
-          unlockOpen: false,
-          unlockPassword: "",
-          pendingFolder: null,
           editMode: append ? this.data.editMode : false,
           batchSelectedCount: append ? this.data.batchSelectedCount : 0,
           allLoadedSelected: false,
@@ -269,12 +267,6 @@ Page({
       this.loadLibrary("", false, false, false);
       return;
     }
-    const folder = this.data.folders.find((item) => item.slug === slug);
-    const tokens = wx.getStorageSync(api.FOLDER_TOKENS_KEY) || {};
-    if (folder && folder.locked && this.data.user.role !== "admin" && !tokens[slug]) {
-      this.openUnlock(folder);
-      return;
-    }
     this.loadLibrary(slug, false, false, false);
   },
 
@@ -325,7 +317,15 @@ Page({
   openCreateFolder() {
     if (this.data.user.role !== "admin" || this.data.creatingFolder) return;
     this.exitEditMode();
-    this.setData({ folderMenuOpen: false, createFolderOpen: true, newFolderName: "" });
+    const userId = this.data.user.id || "";
+    this.setData({
+      folderMenuOpen: false,
+      createFolderOpen: true,
+      newFolderName: "",
+      newFolderVisibility: "admins",
+      newFolderVisibleUserIds: userId ? [userId] : [],
+    });
+    this.loadVisibilityUsers();
   },
 
   closeCreateFolder() {
@@ -344,7 +344,11 @@ Page({
     try {
       const result = await api.request("/api/folders", {
         method: "POST",
-        data: { name },
+        data: {
+          name,
+          visibilityType: this.data.newFolderVisibility,
+          visibleUserIds: this.data.newFolderVisibleUserIds,
+        },
       });
       if (!result.folder || !result.folder.slug) throw new Error("服务器没有返回新文件夹");
       this.setData({ createFolderOpen: false, newFolderName: "", creatingFolder: false });
@@ -362,18 +366,24 @@ Page({
   },
 
   openFolderActions(event) {
-    if (this.data.user.role !== "admin") return;
     const slug = event.currentTarget.dataset.slug;
     const folder = this.data.folders.find((item) => item.slug === slug);
     if (!folder) return;
-    const actions = ["重命名", folder.locked ? "更换密码" : "设置密码"];
-    if (folder.locked) actions.push("移除密码");
+    const actions = [];
+    const handlers = [];
+    if (this.data.user.role === "admin") {
+      actions.push("重命名");
+      handlers.push(() => this.openRename("folder", folder));
+    }
+    if (folder.canManageVisibility) {
+      actions.push("修改可见范围");
+      handlers.push(() => this.openFolderVisibility(folder));
+    }
+    if (!actions.length) return;
     wx.showActionSheet({
       itemList: actions,
       success: ({ tapIndex }) => {
-        if (tapIndex === 0) this.openRename("folder", folder);
-        else if (tapIndex === 1) this.openFolderPassword(folder);
-        else if (tapIndex === 2) this.confirmRemoveFolderPassword(folder);
+        if (handlers[tapIndex]) handlers[tapIndex]();
       },
     });
   },
@@ -436,114 +446,114 @@ Page({
     }
   },
 
-  openFolderPassword(folder) {
+  syncVisibilityUsers() {
+    const newIds = this.data.newFolderVisibleUserIds || [];
+    const folderIds = this.data.folderVisibleUserIds || [];
     this.setData({
-      folderMenuOpen: false,
-      folderPasswordOpen: true,
-      folderPassword: "",
-      managedFolder: folder,
+      visibilityUsers: this.data.visibilityUsers.map((user) => ({
+        ...user,
+        newSelected: newIds.includes(user.id),
+        folderSelected: folderIds.includes(user.id),
+      })),
     });
   },
 
-  updateFolderPassword(event) {
-    this.setData({ folderPassword: event.detail.value });
+  loadVisibilityUsers(folderSlug = "") {
+    if (this.data.visibilityUsers.length) {
+      this.syncVisibilityUsers();
+      return Promise.resolve(this.data.visibilityUsers);
+    }
+    const query = folderSlug ? `?folder=${encodeURIComponent(folderSlug)}` : "";
+    return api.request(`/api/users/options${query}`)
+      .then(({ users }) => {
+        this.setData({ visibilityUsers: users || [] }, () => this.syncVisibilityUsers());
+        return users || [];
+      })
+      .catch((error) => {
+        wx.showToast({ title: error.message || "读取用户列表失败", icon: "none" });
+        return [];
+      });
   },
 
-  closeFolderPassword() {
-    if (this.data.folderSecuritySaving) return;
-    this.setData({ folderPasswordOpen: false, folderPassword: "", managedFolder: null });
+  setNewFolderVisibility(event) {
+    const visibilityType = event.currentTarget.dataset.type;
+    const userId = this.data.user.id || "";
+    const ids = visibilityType === "specific" && userId && !this.data.newFolderVisibleUserIds.includes(userId)
+      ? this.data.newFolderVisibleUserIds.concat(userId)
+      : this.data.newFolderVisibleUserIds;
+    this.setData({ newFolderVisibility: visibilityType, newFolderVisibleUserIds: ids }, () => this.syncVisibilityUsers());
   },
 
-  async saveFolderPassword() {
+  updateNewVisibleUsers(event) {
+    const userId = this.data.user.id || "";
+    const ids = event.detail.value || [];
+    if (userId && !ids.includes(userId)) ids.push(userId);
+    this.setData({ newFolderVisibleUserIds: ids }, () => this.syncVisibilityUsers());
+  },
+
+  openFolderVisibility(folder) {
+    if (!folder || !folder.canManageVisibility) return;
+    this.setData({
+      folderMenuOpen: false,
+      folderVisibilityOpen: true,
+      folderVisibility: folder.visibilityType || "all",
+      folderVisibleUserIds: folder.visibleUserIds || [],
+      managedFolder: folder,
+    }, () => {
+      this.syncVisibilityUsers();
+      this.loadVisibilityUsers(folder.slug);
+    });
+  },
+
+  closeFolderVisibility() {
+    if (this.data.folderVisibilitySaving) return;
+    this.setData({ folderVisibilityOpen: false, managedFolder: null });
+  },
+
+  setFolderVisibility(event) {
+    const visibilityType = event.currentTarget.dataset.type;
+    const creatorUserId = this.data.managedFolder && this.data.managedFolder.creatorUserId || "";
+    const ids = visibilityType === "specific" && creatorUserId && !this.data.folderVisibleUserIds.includes(creatorUserId)
+      ? this.data.folderVisibleUserIds.concat(creatorUserId)
+      : this.data.folderVisibleUserIds;
+    this.setData({ folderVisibility: visibilityType, folderVisibleUserIds: ids }, () => this.syncVisibilityUsers());
+  },
+
+  updateFolderVisibleUsers(event) {
+    const creatorUserId = this.data.managedFolder && this.data.managedFolder.creatorUserId || "";
+    const ids = event.detail.value || [];
+    if (creatorUserId && !ids.includes(creatorUserId)) ids.push(creatorUserId);
+    this.setData({ folderVisibleUserIds: ids }, () => this.syncVisibilityUsers());
+  },
+
+  async saveFolderVisibility() {
     const folder = this.data.managedFolder;
-    const password = this.data.folderPassword;
-    if (!folder || password.length < 4 || password.length > 128 || this.data.folderSecuritySaving) return;
-    this.setData({ folderSecuritySaving: true });
+    if (!folder || !folder.canManageVisibility || this.data.folderVisibilitySaving) return;
+    this.setData({ folderVisibilitySaving: true });
     try {
       await api.request("/api/folders", {
         method: "PATCH",
-        data: { folderSlug: folder.slug, password },
+        data: {
+          folderSlug: folder.slug,
+          visibilityType: this.data.folderVisibility,
+          visibleUserIds: this.data.folderVisibleUserIds,
+        },
       });
-      this.setData({ folderSecuritySaving: false, folderPasswordOpen: false, folderPassword: "", managedFolder: null });
-      wx.showToast({ title: folder.locked ? "密码已更换" : "文件夹已加密", icon: "success" });
+      this.setData({ folderVisibilitySaving: false, folderVisibilityOpen: false, managedFolder: null });
+      wx.showToast({ title: "可见范围已更新", icon: "success" });
       this.loadLibrary(this.data.selectedFolder, true, false, this.data.recycleMode);
     } catch (error) {
-      this.setData({ folderSecuritySaving: false });
+      this.setData({ folderVisibilitySaving: false });
       if (error.statusCode === 401) {
         api.clearSession();
         wx.reLaunch({ url: "/pages/login/login" });
         return;
       }
-      wx.showToast({ title: error.message || "设置密码失败", icon: "none" });
+      wx.showToast({ title: error.message || "设置可见范围失败", icon: "none" });
     }
-  },
-
-  confirmRemoveFolderPassword(folder) {
-    this.setData({ folderMenuOpen: false });
-    wx.showModal({
-      title: "移除文件夹密码",
-      content: `确定将“${folder.name}”设为公开文件夹吗？`,
-      confirmText: "移除密码",
-      confirmColor: "#b85246",
-      success: ({ confirm }) => {
-        if (confirm) this.removeFolderPassword(folder);
-      },
-    });
-  },
-
-  async removeFolderPassword(folder) {
-    if (!folder || this.data.folderSecuritySaving) return;
-    this.setData({ folderSecuritySaving: true });
-    try {
-      await api.request(`/api/folders?folderSlug=${encodeURIComponent(folder.slug)}`, { method: "DELETE" });
-      this.setData({ folderSecuritySaving: false });
-      wx.showToast({ title: "密码已移除", icon: "success" });
-      this.loadLibrary(this.data.selectedFolder, true, false, this.data.recycleMode);
-    } catch (error) {
-      this.setData({ folderSecuritySaving: false });
-      if (error.statusCode === 401) {
-        api.clearSession();
-        wx.reLaunch({ url: "/pages/login/login" });
-        return;
-      }
-      wx.showToast({ title: error.message || "移除密码失败", icon: "none" });
-    }
-  },
-
-  openUnlock(folder) {
-    this.setData({ unlockOpen: true, pendingFolder: folder, unlockPassword: "", loading: false, error: "" });
-  },
-
-  closeUnlock() {
-    if (this.data.unlocking) return;
-    this.setData({ unlockOpen: false, pendingFolder: null, unlockPassword: "" });
   },
 
   noop() {},
-
-  updateUnlockPassword(event) {
-    this.setData({ unlockPassword: event.detail.value });
-  },
-
-  unlockFolder() {
-    const folder = this.data.pendingFolder;
-    const password = this.data.unlockPassword;
-    if (!folder || !password || this.data.unlocking) return;
-    this.setData({ unlocking: true });
-    api.request("/api/folders/unlock", {
-      method: "POST",
-      data: { folderSlug: folder.slug, password },
-    })
-      .then(({ accessToken }) => {
-        if (!accessToken) throw new Error("服务器没有返回文件夹凭证");
-        const tokens = wx.getStorageSync(api.FOLDER_TOKENS_KEY) || {};
-        tokens[folder.slug] = accessToken;
-        wx.setStorageSync(api.FOLDER_TOKENS_KEY, tokens);
-        this.loadLibrary(folder.slug);
-      })
-      .catch((error) => wx.showToast({ title: error.message || "解锁失败", icon: "none" }))
-      .finally(() => this.setData({ unlocking: false }));
-  },
 
   thumbnailError(event) {
     const id = event.currentTarget.dataset.id;
@@ -566,11 +576,8 @@ Page({
       wx.navigateTo({ url: "/pages/viewer/viewer" });
       return;
     }
-    const tokens = wx.getStorageSync(api.FOLDER_TOKENS_KEY) || {};
     wx.showLoading({ title: "正在打开" });
-    api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`, {
-      folderToken: tokens[item.folderSlug] || "",
-    })
+    api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`)
       .then(({ url }) => {
         const current = mediaUrl(url || item.url);
         const urls = this.data.photos
@@ -665,7 +672,7 @@ Page({
     this.setData({
       batchMoveOpen: true,
       moveFolders,
-      moveFolderNames: moveFolders.map((folder) => `${folder.name}${folder.locked ? "（已加密）" : ""}`),
+      moveFolderNames: moveFolders.map((folder) => `${folder.name}（${folder.visibilityLabel}可见）`),
       moveFolderIndex: 0,
     });
   },

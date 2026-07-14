@@ -7,7 +7,7 @@ import {
   renamePhotoRecord,
   uploadPhoto,
 } from "../../../lib/cloudbase";
-import { canWriteFolder, unauthorized } from "../../../lib/access";
+import { canUserReadFolder, canWriteFolder, unauthorized } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
@@ -100,6 +100,10 @@ export async function PATCH(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
+    const folder = await findFolder(photo.folderSlug);
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "文件不存在" }, { status: 404 });
+    }
     const lastActionAt = new Date().toISOString();
     await renamePhotoRecord(id, name, user.displayName);
     await recordAudit(request, user, {
@@ -132,6 +136,10 @@ export async function DELETE(request: Request) {
 
     const photo = await findPhoto(id);
     if (!photo) return Response.json({ error: "文件不存在" }, { status: 404 });
+    const folder = await findFolder(photo.folderSlug);
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "文件不存在" }, { status: 404 });
+    }
     if (photo.deletedAt) return Response.json({ error: "文件已经位于回收站" }, { status: 400 });
     const deletedAt = new Date().toISOString();
     const purgeAt = new Date(Date.now() + RECYCLE_RETENTION_MS).toISOString();

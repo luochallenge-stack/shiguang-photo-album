@@ -35,14 +35,18 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(client, /api\/folders\/share/);
   assert.match(client, /重命名\{mediaLabel\(editingPhoto\)\}/);
   assert.match(client, /移入回收站/);
-  assert.match(client, /这个文件夹已加密/);
-  assert.match(client, /设置密码/);
-  assert.match(client, /api\/folders\/unlock/);
-  assert.match(accessControl, /PBKDF2/);
-  assert.match(accessControl, /HttpOnly; Secure; SameSite=Lax/);
+  assert.match(client, /VisibilityFields/);
+  assert.match(client, /所有人可见/);
+  assert.match(client, /管理员可见/);
+  assert.match(client, /某些人可见/);
+  assert.doesNotMatch(client, /文件夹密码|api\/folders\/unlock|folderLocked/);
+  assert.match(accessControl, /folderVisibilityType/);
+  assert.match(accessControl, /canUserReadFolder/);
+  assert.match(accessControl, /canManageFolderVisibility/);
   assert.match(accessControl, /createMediaUploadTicket/);
-  assert.match(libraryRoute, /folderLocked/);
-  assert.match(libraryRoute, /lockedSlugs/);
+  assert.match(libraryRoute, /hiddenFolderSlugs/);
+  assert.match(libraryRoute, /visibleFolderRows/);
+  assert.doesNotMatch(libraryRoute, /folderLocked|lockedSlugs/);
   assert.doesNotMatch(libraryRoute, /\.\.\.folder/);
   assert.match(uploadRoute, /createDirectUpload/);
   assert.match(uploadRoute, /confirmUploadedFile/);
@@ -126,7 +130,7 @@ test("paginates CloudBase media queries by album for both clients", async () => 
   assert.match(cloudbase, /purgeAt: command\.exists/);
   assert.match(libraryRoute, /folderSlug: selectedFolder/);
   assert.match(libraryRoute, /excludedFolderSlugs/);
-  assert.match(libraryRoute, /listRecycledPhotoPage\(\{ offset, limit \}\)/);
+  assert.match(libraryRoute, /listRecycledPhotoPage\(\{ excludedFolderSlugs: hiddenFolderSlugs, offset, limit \}\)/);
   assert.match(client, /WEB_PAGE_SIZE = 48/);
   assert.match(client, /加载更多/);
   assert.match(miniLibrary, /PAGE_SIZE = 24/);
@@ -164,7 +168,6 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(api, /Authorization: `Bearer/);
   assert.match(login, /api\/auth\/session/);
   assert.match(library, /api\/library/);
-  assert.match(library, /api\/folders\/unlock/);
   assert.match(library, /api\.request\("\/api\/folders"/);
   assert.match(library, /createFolder/);
   assert.match(library, /moveFolderOrder/);
@@ -176,14 +179,16 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(folderNameRoute, /updateFolderName/);
   assert.match(cloudbase, /sortOrder/);
   assert.match(library, /openFolderActions/);
-  assert.match(library, /saveFolderPassword/);
-  assert.match(library, /removeFolderPassword/);
+  assert.match(library, /saveFolderVisibility/);
+  assert.match(library, /loadVisibilityUsers/);
+  assert.doesNotMatch(library, /saveFolderPassword|removeFolderPassword|unlockFolder/);
   assert.match(library, /\/api\/folders\/name/);
   assert.match(library, /openMediaActions/);
   assert.match(library, /method: "PATCH"/);
   assert.match(libraryTemplate, /folder-manage-button/);
   assert.match(libraryTemplate, /media-more/);
-  assert.match(libraryTemplate, /folderPasswordOpen/);
+  assert.match(libraryTemplate, /folderVisibilityOpen/);
+  assert.match(libraryTemplate, /某些人可见/);
   assert.match(library, /wx\.chooseMedia/);
   assert.match(library, /mediaType: \["image", "video"\]/);
   assert.match(library, /MAX_VIDEO_BYTES = 500/);
@@ -213,7 +218,45 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(libraryRoute, /thumbnailUrl/);
   assert.match(libraryRoute, /hasMore/);
   assert.match(mediaUrlRoute, /2 \* 60 \* 60/);
-  assert.match(mediaUrlRoute, /canReadFolder/);
+  assert.match(mediaUrlRoute, /canUserReadFolder/);
   assert.match(auth, /authorization\.startsWith\("Bearer "\)/);
-  assert.match(accessControl, /x-album-folder-token/);
+  assert.doesNotMatch(accessControl + api + library, /x-album-folder-token/);
+});
+
+test("enforces identity-based folder visibility across backend entry points", async () => {
+  const [accessControl, cloudbase, folderRoute, libraryRoute, photoRoute, batchRoute, recycleRoute, urlRoute, auditRoute, logsRoute, usersRoute, client, miniLibrary] = await Promise.all([
+    readFile(new URL("../lib/access.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/folders/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/library/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/batch/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/recycle/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/audit/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/audit-logs/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/users/options/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(cloudbase, /visibilityType\?: FolderVisibilityType/);
+  assert.match(cloudbase, /visibleUserIds\?: string\[\]/);
+  assert.match(cloudbase, /creatorUserId\?: string/);
+  assert.match(accessControl, /folder\.passwordHash \? "admins" : "all"/);
+  assert.match(accessControl, /folder\.visibleUserIds\.includes\(user\.id\)/);
+  assert.match(accessControl, /folder\.creatorUserId === user\.id/);
+  assert.match(accessControl, /isSuperAdmin/);
+  assert.match(folderRoute, /validatedVisibleUserIds/);
+  assert.match(folderRoute, /canManageFolderVisibility/);
+  assert.match(folderRoute, /folder\.visibility\.update/);
+  assert.match(libraryRoute, /folders: visibleFolderRows\.map/);
+  assert.match(libraryRoute, /countRecycledPhotos\(hiddenFolderSlugs\)/);
+  for (const route of [photoRoute, batchRoute, recycleRoute, urlRoute, auditRoute]) {
+    assert.match(route, /canUserReadFolder/);
+  }
+  assert.match(logsRoute, /isSuperAdmin/);
+  assert.match(usersRoute, /status === "active"/);
+  assert.match(client, /canManageVisibility/);
+  assert.match(miniLibrary, /canManageVisibility/);
+  assert.doesNotMatch(client + miniLibrary, /文件夹密码|解锁文件夹/);
 });

@@ -34,13 +34,13 @@
         <view class="folder-menu-row" wx:for="{{folders}}" wx:key="id">
           <button class="folder-menu-main {{selectedFolder === item.slug && !recycleMode ? 'active' : ''}}" data-slug="{{item.slug}}" bindtap="chooseFolder">
             <text class="folder-menu-name">{{item.name}}</text>
-            <text wx:if="{{item.locked}}" class="locked-mark">已加密</text>
-            <text wx:else class="folder-count">{{item.photoCount}}</text>
+            <text class="visibility-mark {{item.visibilityType}}">{{item.visibilityLabel}}</text>
+            <text class="folder-count">{{item.photoCount}}</text>
           </button>
-          <view wx:if="{{user.role === 'admin'}}" class="folder-order-actions">
-            <button class="folder-manage-button" data-slug="{{item.slug}}" bindtap="openFolderActions" aria-label="管理文件夹">···</button>
-            <button data-index="{{index}}" data-direction="-1" bindtap="moveFolderOrder" disabled="{{index === 0 || reorderingFolders}}" aria-label="上移文件夹">↑</button>
-            <button data-index="{{index}}" data-direction="1" bindtap="moveFolderOrder" disabled="{{index === folders.length - 1 || reorderingFolders}}" aria-label="下移文件夹">↓</button>
+          <view wx:if="{{user.role === 'admin' || item.canManageVisibility}}" class="folder-order-actions">
+            <button wx:if="{{user.role === 'admin' || item.canManageVisibility}}" class="folder-manage-button" data-slug="{{item.slug}}" bindtap="openFolderActions" aria-label="管理文件夹">···</button>
+            <button wx:if="{{user.role === 'admin'}}" data-index="{{index}}" data-direction="-1" bindtap="moveFolderOrder" disabled="{{index === 0 || reorderingFolders}}" aria-label="上移文件夹">↑</button>
+            <button wx:if="{{user.role === 'admin'}}" data-index="{{index}}" data-direction="1" bindtap="moveFolderOrder" disabled="{{index === folders.length - 1 || reorderingFolders}}" aria-label="下移文件夹">↓</button>
           </view>
         </view>
         <view wx:if="{{user.role === 'admin'}}" class="folder-menu-row recycle-menu-row">
@@ -132,43 +132,31 @@
       />
       <view class="dialog-actions">
         <button class="cancel-button" bindtap="closeRename" disabled="{{renaming}}">取消</button>
-        <button class="unlock-button" bindtap="saveRename" disabled="{{renaming || !renameValue}}" loading="{{renaming}}">保存</button>
+        <button class="dialog-primary-button" bindtap="saveRename" disabled="{{renaming || !renameValue}}" loading="{{renaming}}">保存</button>
       </view>
     </view>
   </view>
 
-  <view class="selection-backdrop" wx:if="{{folderPasswordOpen}}" bindtap="closeFolderPassword">
+  <view class="selection-backdrop" wx:if="{{folderVisibilityOpen}}" bindtap="closeFolderVisibility">
     <view class="selection-dialog" catchtap="noop">
-      <text class="dialog-eyebrow">{{managedFolder.locked ? '更换文件夹密码' : '加密文件夹'}}</text>
+      <text class="dialog-eyebrow">修改可见范围</text>
       <text class="dialog-title">{{managedFolder.name}}</text>
-      <text class="dialog-copy">密码需要 4 至 128 个字符。</text>
-      <input
-        class="password-input"
-        password
-        value="{{folderPassword}}"
-        bindinput="updateFolderPassword"
-        bindconfirm="saveFolderPassword"
-        confirm-type="done"
-        focus="{{folderPasswordOpen}}"
-        maxlength="128"
-        placeholder="输入文件夹密码"
-      />
-      <view class="dialog-actions">
-        <button class="cancel-button" bindtap="closeFolderPassword" disabled="{{folderSecuritySaving}}">取消</button>
-        <button class="unlock-button" bindtap="saveFolderPassword" disabled="{{folderSecuritySaving || folderPassword.length < 4}}" loading="{{folderSecuritySaving}}">保存密码</button>
+      <text class="dialog-copy">没有权限的人不会在目录、全部影像或搜索结果中看到这个文件夹。</text>
+      <view class="visibility-options">
+        <button class="visibility-option {{folderVisibility === 'all' ? 'active' : ''}}" data-type="all" bindtap="setFolderVisibility"><text>所有人可见</text><text>任何注册用户</text></button>
+        <button class="visibility-option {{folderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setFolderVisibility"><text>管理员可见</text><text>仅管理员</text></button>
+        <button class="visibility-option {{folderVisibility === 'specific' ? 'active' : ''}}" data-type="specific" bindtap="setFolderVisibility"><text>某些人可见</text><text>仅勾选用户</text></button>
       </view>
-    </view>
-  </view>
-
-  <view class="modal-backdrop" wx:if="{{unlockOpen}}" bindtap="closeUnlock">
-    <view class="unlock-dialog" catchtap="noop">
-      <text class="dialog-eyebrow">受保护文件夹</text>
-      <text class="dialog-title">{{pendingFolder.name}}</text>
-      <text class="dialog-copy">输入文件夹密码后查看其中的照片和视频。</text>
-      <input class="password-input" password value="{{unlockPassword}}" bindinput="updateUnlockPassword" focus maxlength="80" />
+      <checkbox-group wx:if="{{folderVisibility === 'specific'}}" class="visibility-users" bindchange="updateFolderVisibleUsers">
+        <label wx:for="{{visibilityUsers}}" wx:for-item="visibilityUser" wx:key="id">
+          <checkbox value="{{visibilityUser.id}}" checked="{{visibilityUser.folderSelected}}" disabled="{{visibilityUser.id === managedFolder.creatorUserId}}" />
+          <view><text>{{visibilityUser.displayName}}</text><text>{{visibilityUser.accountLabel}}</text></view>
+          <text>{{visibilityUser.role === 'admin' ? '管理员' : '成员'}}</text>
+        </label>
+      </checkbox-group>
       <view class="dialog-actions">
-        <button class="cancel-button" bindtap="closeUnlock">取消</button>
-        <button class="unlock-button" loading="{{unlocking}}" disabled="{{unlocking || !unlockPassword}}" bindtap="unlockFolder">解锁</button>
+        <button class="cancel-button" bindtap="closeFolderVisibility" disabled="{{folderVisibilitySaving}}">取消</button>
+        <button class="dialog-primary-button" bindtap="saveFolderVisibility" disabled="{{folderVisibilitySaving || (folderVisibility === 'specific' && !folderVisibleUserIds.length)}}" loading="{{folderVisibilitySaving}}">保存</button>
       </view>
     </view>
   </view>
@@ -188,9 +176,21 @@
         maxlength="80"
         placeholder="例如：2026 青岛旅行"
       />
+      <view class="visibility-options">
+        <button class="visibility-option {{newFolderVisibility === 'all' ? 'active' : ''}}" data-type="all" bindtap="setNewFolderVisibility"><text>所有人可见</text><text>任何注册用户</text></button>
+        <button class="visibility-option {{newFolderVisibility === 'admins' ? 'active' : ''}}" data-type="admins" bindtap="setNewFolderVisibility"><text>管理员可见</text><text>仅管理员</text></button>
+        <button class="visibility-option {{newFolderVisibility === 'specific' ? 'active' : ''}}" data-type="specific" bindtap="setNewFolderVisibility"><text>某些人可见</text><text>仅勾选用户</text></button>
+      </view>
+      <checkbox-group wx:if="{{newFolderVisibility === 'specific'}}" class="visibility-users" bindchange="updateNewVisibleUsers">
+        <label wx:for="{{visibilityUsers}}" wx:for-item="visibilityUser" wx:key="id">
+          <checkbox value="{{visibilityUser.id}}" checked="{{visibilityUser.newSelected}}" disabled="{{visibilityUser.id === user.id}}" />
+          <view><text>{{visibilityUser.displayName}}</text><text>{{visibilityUser.accountLabel}}</text></view>
+          <text>{{visibilityUser.role === 'admin' ? '管理员' : '成员'}}</text>
+        </label>
+      </checkbox-group>
       <view class="dialog-actions">
         <button class="cancel-button" bindtap="closeCreateFolder" disabled="{{creatingFolder}}">取消</button>
-        <button class="unlock-button" bindtap="createFolder" disabled="{{creatingFolder || !newFolderName}}" loading="{{creatingFolder}}">创建</button>
+        <button class="dialog-primary-button" bindtap="createFolder" disabled="{{creatingFolder || !newFolderName || (newFolderVisibility === 'specific' && !newFolderVisibleUserIds.length)}}" loading="{{creatingFolder}}">创建</button>
       </view>
     </view>
   </view>
@@ -227,7 +227,7 @@
       </picker>
       <view class="dialog-actions">
         <button class="cancel-button" bindtap="closeBatchMove" disabled="{{batchSaving}}">取消</button>
-        <button class="unlock-button" bindtap="moveSelectedMedia" disabled="{{batchSaving}}" loading="{{batchSaving}}">确认移动</button>
+        <button class="dialog-primary-button" bindtap="moveSelectedMedia" disabled="{{batchSaving}}" loading="{{batchSaving}}">确认移动</button>
       </view>
     </view>
   </view>

@@ -22,11 +22,8 @@ Page({
 
   loadVideo() {
     const media = this.data.media;
-    const tokens = wx.getStorageSync(api.FOLDER_TOKENS_KEY) || {};
     this.setData({ loading: true, waiting: false, error: "" });
-    api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`, {
-      folderToken: tokens[media.folderSlug] || "",
-    })
+    api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`)
       .then(({ url }) => {
         if (!url) throw new Error("服务器没有返回视频链接");
         this.setData({ videoUrl: encodeURI(url), loading: false });

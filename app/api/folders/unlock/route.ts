@@ -1,66 +1,7 @@
-import { createFolderAccessCookie, createFolderAccessToken, verifyFolderPassword } from "../../../../lib/access";
-import { findFolder } from "../../../../lib/cloudbase";
-import { currentUser, isMiniProgramRequest, unauthenticated } from "../../../../lib/auth";
-import { recordAudit } from "../../../../lib/audit";
-
-type Attempt = { count: number; resetAt: number };
-
-const attempts = new Map<string, Attempt>();
-const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
-const ATTEMPT_LIMIT = 8;
-
-function attemptKey(request: Request, folderSlug: string): string {
-  const address = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  return `${address}:${folderSlug}`;
-}
+import { currentUser, unauthenticated } from "../../../../lib/auth";
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  try {
-    const payload = (await request.json()) as { folderSlug?: unknown; password?: unknown };
-    const folderSlug = typeof payload.folderSlug === "string" ? payload.folderSlug.trim() : "";
-    const password = typeof payload.password === "string" ? payload.password : "";
-    if (!folderSlug || !password) return Response.json({ error: "请输入文件夹密码" }, { status: 400 });
-
-    const key = attemptKey(request, folderSlug);
-    const now = Date.now();
-    const current = attempts.get(key);
-    const attempt = current && current.resetAt > now ? current : { count: 0, resetAt: now + ATTEMPT_WINDOW_MS };
-    if (attempt.count >= ATTEMPT_LIMIT) {
-      return Response.json({ error: "尝试次数过多，请稍后再试" }, { status: 429 });
-    }
-
-    const folder = await findFolder(folderSlug);
-    if (!folder?.passwordHash || !(await verifyFolderPassword(password, folder.passwordHash))) {
-      attempts.set(key, { ...attempt, count: attempt.count + 1 });
-      await recordAudit(request, user, {
-        action: "folder.unlock.failed",
-        resourceType: "folder",
-        resourceId: folder?.id || "",
-        resourceName: folder?.name || folderSlug,
-        metadata: { folderSlug },
-      });
-      return Response.json({ error: "文件夹密码错误" }, { status: 401 });
-    }
-
-    attempts.delete(key);
-    const accessToken = await createFolderAccessToken(folder);
-    await recordAudit(request, user, {
-      action: "folder.unlock",
-      resourceType: "folder",
-      resourceId: folder.id,
-      resourceName: folder.name,
-      metadata: { folderSlug },
-    });
-    return Response.json({
-      ok: true,
-      ...(isMiniProgramRequest(request) ? { accessToken } : {}),
-    }, {
-      headers: { "set-cookie": await createFolderAccessCookie(folder, accessToken) },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "解锁文件夹失败";
-    return Response.json({ error: message }, { status: 500 });
-  }
+  return Response.json({ error: "文件夹密码功能已停用，请使用账号权限访问" }, { status: 410 });
 }

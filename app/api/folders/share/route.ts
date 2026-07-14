@@ -1,5 +1,5 @@
 import { findFolder, setUploadTokenRecord } from "../../../../lib/cloudbase";
-import { hashUploadToken } from "../../../../lib/access";
+import { canUserReadFolder, hashUploadToken } from "../../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 
@@ -18,7 +18,9 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as { folderSlug?: string };
     const folderSlug = payload.folderSlug?.trim() || "";
     const folder = await findFolder(folderSlug);
-    if (!folder) return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "目标文件夹不存在" }, { status: 404 });
+    }
 
     const uploadToken = createToken();
     const tokenHash = await hashUploadToken(uploadToken);

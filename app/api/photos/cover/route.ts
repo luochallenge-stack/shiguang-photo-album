@@ -1,10 +1,12 @@
 import {
   createObjectKey,
   deletePhotoFile,
+  findFolder,
   findPhoto,
   updatePhotoCoverFileId,
   uploadPhoto,
 } from "../../../../lib/cloudbase";
+import { canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { isVideoMimeType, mediaInfo, mediaSizeError } from "../../../../lib/media";
@@ -27,6 +29,10 @@ export async function POST(request: Request) {
 
     const photo = await findPhoto(photoId);
     if (!photo || photo.deletedAt) return Response.json({ error: "视频不存在" }, { status: 404 });
+    const folder = await findFolder(photo.folderSlug);
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "视频不存在" }, { status: 404 });
+    }
     if (!isVideoMimeType(photo.mimeType)) return Response.json({ error: "只有视频可以设置封面" }, { status: 400 });
 
     const objectKey = createObjectKey(photo.folderSlug, `${photo.id}-${requestedName}`);
