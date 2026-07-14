@@ -95,7 +95,7 @@
         <view wx:if="{{item.video}}" class="video-play-overlay">
           <view class="play-button"><view class="play-triangle" /></view>
         </view>
-        <button wx:if="{{user.canEdit && !editMode}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="重命名文件">···</button>
+        <button wx:if="{{!editMode && (!item.video || user.canEdit)}}" class="media-more" data-id="{{item.id}}" catchtap="openMediaActions" aria-label="转发或编辑影像">···</button>
         <view wx:if="{{editMode}}" class="media-select {{item.selected ? 'checked' : ''}}">{{item.selected ? '✓' : ''}}</view>
       </view>
       <view class="media-copy">

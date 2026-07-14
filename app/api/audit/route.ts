@@ -3,7 +3,7 @@ import { recordAudit } from "../../../lib/audit";
 import { canUserReadFolder } from "../../../lib/access";
 import { findFolder, findPhoto } from "../../../lib/cloudbase";
 
-const ALLOWED_ACTIONS = new Set(["media.view", "media.download"]);
+const ALLOWED_ACTIONS = new Set(["media.view", "media.download", "media.share"]);
 
 export async function POST(request: Request) {
   const user = await currentUser(request);

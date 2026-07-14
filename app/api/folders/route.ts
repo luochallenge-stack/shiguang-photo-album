@@ -1,12 +1,14 @@
 import {
+  countPhotosInFolder,
   createFolderRecord,
+  deleteFolderRecord,
   findFolder,
   listUsers,
   updateFolderVisibility,
   type FolderVisibilityType,
 } from "../../../lib/cloudbase";
 import { folderSlug, normalizeFolderName } from "../../../lib/validation";
-import { canManageFolders, canManageFolderVisibility, folderVisibilityType } from "../../../lib/access";
+import { canManageFolders, canManageFolderVisibility, canUserReadFolder, folderVisibilityType } from "../../../lib/access";
 import { currentUser, forbidden, unauthenticated } from "../../../lib/auth";
 import { recordAudit } from "../../../lib/audit";
 
@@ -134,5 +136,31 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const user = await currentUser(request);
   if (!user) return unauthenticated();
-  return Response.json({ error: "文件夹密码功能已停用，请改用可见范围" }, { status: 410 });
+  if (!canManageFolders(user)) return forbidden();
+  try {
+    const slug = new URL(request.url).searchParams.get("folder")?.trim() || "";
+    if (!slug) return Response.json({ error: "缺少文件夹标识" }, { status: 400 });
+    const folder = await findFolder(slug);
+    if (!folder || !canUserReadFolder(folder, user)) {
+      return Response.json({ error: "文件夹不存在" }, { status: 404 });
+    }
+    const photoCount = await countPhotosInFolder(folder.slug);
+    if (photoCount > 0) {
+      return Response.json({
+        error: `文件夹中仍有 ${photoCount} 项影像（包含回收站），请先移动或永久删除后再删除文件夹`,
+      }, { status: 409 });
+    }
+    await deleteFolderRecord(folder.id, folder.slug);
+    await recordAudit(request, user, {
+      action: "folder.delete",
+      resourceType: "folder",
+      resourceId: folder.id,
+      resourceName: folder.name,
+      metadata: { folderSlug: folder.slug },
+    });
+    return Response.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "删除文件夹失败";
+    return Response.json({ error: message }, { status: 500 });
+  }
 }

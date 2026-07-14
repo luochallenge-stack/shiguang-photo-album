@@ -207,6 +207,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - `/api/library` 为列表中当前页媒体生成临时地址。
 - 小程序图片列表使用 CloudBase `imageMogr2` 生成 640x640 WebP 缩略图。
 - 小程序打开图片或视频时调用 `GET /api/photos/url?id=...` 刷新地址。
+- 小程序“转发原图”先下载刷新后的原始文件到本地临时路径，再调用 `wx.showShareImageMenu`，不要转发列表缩略图。
 - 图片刷新地址有效期 10 分钟，视频刷新地址有效期 2 小时。
 - `GET /api/photos/url` 必须先检查所属文件夹的读取权限，并返回 `cache-control: no-store`。
 - 中文文件夹或文件名可能出现在临时 URL 中，小程序赋给 `<video>` 或预览组件前必须保留 `encodeURI(url)`。
@@ -227,6 +228,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `PATCH /api/folders` | manageFolders 创建者/超级管理员 | 修改文件夹可见范围 |
 | `PATCH /api/folders/order` | manageFolders | 保存当前用户可见目录顺序，不改变隐藏目录相对位置 |
 | `PATCH /api/folders/name` | manageFolders | 重命名文件夹，保持 slug 不变 |
+| `DELETE /api/folders?folder={slug}` | manageFolders | 删除空文件夹并清理上传令牌；仍有正常或回收站影像时返回 409 |
 | `POST /api/folders/share` | manageFolders | 生成或轮换上传链接令牌 |
 | `GET /api/users/options` | manageFolders/可管理可见范围 | 返回有效用户，供可见范围选择器使用 |
 | `POST /api/photos/upload` | upload/上传令牌 | 生成 Web 直传信息和票据 |
@@ -239,7 +241,7 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 | `DELETE /api/photos/batch` | delete | 将最多 100 项影像移入回收站 |
 | `PATCH/DELETE /api/photos/recycle` | delete | 批量恢复，或立即永久删除回收站影像 |
 | `GET /api/photos/url` | 文件夹可读 | 刷新图片或视频临时地址 |
-| `POST /api/audit` | 登录 | 记录客户端预览或下载事件 |
+| `POST /api/audit` | 登录 | 记录客户端预览、下载或转发事件 |
 | `GET/PATCH /api/admin/users` | 超级管理员/assignTitles | 超级管理员管理六项权限、状态和称号；称号管理者只读取基础用户信息并修改称号 |
 | `GET /api/admin/audit-logs` | 超级管理员 | 审计日志列表 |
 | `POST /api/admin/verify` | manageFolders | 简单文件夹管理身份检查 |

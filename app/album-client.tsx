@@ -155,6 +155,7 @@ const ACTION_LABELS: Record<string, string> = {
   "album.view": "访问相册",
   "media.view": "预览影像",
   "media.download": "下载影像",
+  "media.share": "转发影像",
   "media.upload": "上传影像",
   "media.rename": "重命名影像",
   "media.delete": "删除影像",
@@ -165,6 +166,7 @@ const ACTION_LABELS: Record<string, string> = {
   "media.purge.batch": "永久删除影像",
   "recycle.view": "查看回收站",
   "folder.create": "创建文件夹",
+  "folder.delete": "删除文件夹",
   "folder.visibility.update": "修改可见范围",
   "folder.share.create": "生成上传链接",
   "user.access.update": "修改用户权限",
@@ -432,6 +434,8 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
   const [editingFolder, setEditingFolder] = useState<FolderItem | null>(null);
   const [editingFolderName, setEditingFolderName] = useState("");
   const [savingFolderName, setSavingFolderName] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState<FolderItem | null>(null);
+  const [savingFolderDelete, setSavingFolderDelete] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<PhotoItem | null>(null);
   const [editingName, setEditingName] = useState("");
   const [deletingPhoto, setDeletingPhoto] = useState<PhotoItem | null>(null);
@@ -773,6 +777,33 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
       setError(cause instanceof Error ? cause.message : "重命名文件夹失败");
     } finally {
       setSavingFolderName(false);
+    }
+  };
+
+  const deleteFolder = async () => {
+    if (!deletingFolder || !canManageFolders) return;
+    setSavingFolderDelete(true);
+    setError("");
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch(`/api/folders?folder=${encodeURIComponent(deletingFolder.slug)}`, {
+          method: "DELETE",
+          headers: adminHeaders(),
+        }),
+      );
+      setDeletingFolder(null);
+      setSelectedFolder("");
+      setPhotos([]);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("folder");
+      url.searchParams.delete("upload");
+      window.history.replaceState({}, "", url);
+      await loadLibrary("", false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "删除文件夹失败");
+      setDeletingFolder(null);
+    } finally {
+      setSavingFolderDelete(false);
     }
   };
 
@@ -1123,6 +1154,12 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <button className="secondary-button" onClick={openFolderRename}>
                 <Pencil size={17} />
                 重命名
+              </button>
+            )}
+            {selectedFolder && activeFolder && canManageFolders && (
+              <button className="secondary-button" onClick={() => setDeletingFolder(activeFolder)} title="删除空文件夹">
+                <Trash2 size={17} />
+                删除
               </button>
             )}
             {selectedFolder && canManageFolders && (
@@ -1549,6 +1586,28 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               <button className="secondary-button" disabled={savingFolderName} onClick={() => setEditingFolder(null)}>取消</button>
               <button className="primary-button" disabled={!editingFolderName.trim() || savingFolderName} onClick={() => void renameFolder()}>
                 {savingFolderName ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />} 保存
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {deletingFolder && (
+        <div className="modal-backdrop" onMouseDown={() => !savingFolderDelete && setDeletingFolder(null)}>
+          <section className="dialog" onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-labelledby="delete-folder-title">
+            <div className="dialog-heading">
+              <div><span className="dialog-icon danger"><Trash2 size={19} /></span><h2 id="delete-folder-title">删除文件夹</h2></div>
+              <button className="icon-button" disabled={savingFolderDelete} onClick={() => setDeletingFolder(null)} aria-label="关闭"><X size={18} /></button>
+            </div>
+            <p className="dialog-message">
+              {deletingFolder.photoCount > 0
+                ? `「${deletingFolder.name}」中还有 ${deletingFolder.photoCount} 项影像，请先移动影像；回收站内容也需要恢复后移动或永久删除。`
+                : `确定删除空文件夹「${deletingFolder.name}」吗？文件夹删除后无法恢复。`}
+            </p>
+            <div className="dialog-actions">
+              <button className="secondary-button" disabled={savingFolderDelete} onClick={() => setDeletingFolder(null)}>取消</button>
+              <button className="danger-button" disabled={savingFolderDelete || deletingFolder.photoCount > 0} onClick={() => void deleteFolder()}>
+                {savingFolderDelete ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />} 删除文件夹
               </button>
             </div>
           </section>

@@ -235,6 +235,16 @@ export async function updateFolderSortOrders(folderIds: string[]): Promise<void>
   )));
 }
 
+export async function countPhotosInFolder(folderSlug: string): Promise<number> {
+  const result = await database().collection(COLLECTIONS.photos).where({ folderSlug }).count();
+  return Math.max(0, Number(result.total) || 0);
+}
+
+export async function deleteFolderRecord(id: string, folderSlug: string): Promise<void> {
+  await database().collection(COLLECTIONS.uploadTokens).doc(folderSlug).remove();
+  await database().collection(COLLECTIONS.folders).doc(id).remove();
+}
+
 export async function listPhotoPage(options: {
   folderSlug?: string;
   excludedFolderSlugs?: string[];

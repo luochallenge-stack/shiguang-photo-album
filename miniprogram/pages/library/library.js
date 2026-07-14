@@ -526,11 +526,49 @@ Page({
       actions.push("修改可见范围");
       handlers.push(() => this.openFolderVisibility(folder));
     }
+    if (this.data.user.canManageFolders) {
+      actions.push("删除空文件夹");
+      handlers.push(() => this.confirmDeleteFolder(folder));
+    }
     if (!actions.length) return;
     wx.showActionSheet({
       itemList: actions,
       success: ({ tapIndex }) => {
         if (handlers[tapIndex]) handlers[tapIndex]();
+      },
+    });
+  },
+
+  confirmDeleteFolder(folder) {
+    if (!folder || !this.data.user.canManageFolders) return;
+    if (Number(folder.photoCount) > 0) {
+      wx.showToast({ title: "请先移动文件夹中的影像", icon: "none" });
+      return;
+    }
+    wx.showModal({
+      title: "删除文件夹",
+      content: `确定删除空文件夹“${folder.name}”吗？回收站中也不能保留该文件夹的影像。`,
+      confirmText: "删除",
+      confirmColor: "#b33a34",
+      success: async ({ confirm }) => {
+        if (!confirm) return;
+        wx.showLoading({ title: "正在删除", mask: true });
+        try {
+          await api.request(`/api/folders?folder=${encodeURIComponent(folder.slug)}`, { method: "DELETE" });
+          const nextFolder = this.data.selectedFolder === folder.slug ? "" : this.data.selectedFolder;
+          this.setData({ folderMenuOpen: false });
+          wx.showToast({ title: "文件夹已删除", icon: "success" });
+          this.loadLibrary(nextFolder, true, false, false);
+        } catch (error) {
+          if (error.statusCode === 401) {
+            api.clearSession();
+            wx.reLaunch({ url: "/pages/login/login" });
+            return;
+          }
+          wx.showToast({ title: error.message || "删除文件夹失败", icon: "none", duration: 3000 });
+        } finally {
+          wx.hideLoading();
+        }
       },
     });
   },
@@ -737,10 +775,74 @@ Page({
   },
 
   openMediaActions(event) {
-    if (!this.data.user.canEdit || this.data.editMode) return;
+    if (this.data.editMode) return;
     const id = event.currentTarget.dataset.id;
     const item = this.data.photos.find((photo) => photo.id === id);
-    if (item) this.openRename("media", item);
+    if (!item) return;
+    const actions = [];
+    const handlers = [];
+    if (!item.video) {
+      actions.push("转发原图");
+      handlers.push(() => this.shareOriginalImage(item));
+    }
+    if (this.data.user.canEdit) {
+      actions.push("重命名");
+      handlers.push(() => this.openRename("media", item));
+    }
+    if (!actions.length) return;
+    wx.showActionSheet({
+      itemList: actions,
+      success: ({ tapIndex }) => {
+        if (handlers[tapIndex]) handlers[tapIndex]();
+      },
+    });
+  },
+
+  async shareOriginalImage(item) {
+    if (!item || item.video) return;
+    wx.showLoading({ title: "正在准备原图", mask: true });
+    try {
+      const result = await api.request(`/api/photos/url?id=${encodeURIComponent(item.id)}`);
+      const originalUrl = mediaUrl(result.url || item.url);
+      if (!originalUrl) throw new Error("原图地址不可用");
+      const tempFilePath = await new Promise((resolve, reject) => {
+        wx.downloadFile({
+          url: originalUrl,
+          timeout: 120000,
+          success: (response) => {
+            if (response.statusCode >= 200 && response.statusCode < 300 && response.tempFilePath) {
+              resolve(response.tempFilePath);
+              return;
+            }
+            reject(new Error(`下载原图失败 (${response.statusCode})`));
+          },
+          fail: (error) => reject(new Error(error.errMsg || "下载原图失败")),
+        });
+      });
+      if (typeof wx.showShareImageMenu !== "function") throw new Error("当前微信版本不支持原图转发");
+      wx.hideLoading();
+      await new Promise((resolve, reject) => {
+        wx.showShareImageMenu({
+          path: tempFilePath,
+          success: resolve,
+          fail: reject,
+        });
+      });
+      api.request("/api/audit", {
+        method: "POST",
+        data: {
+          action: "media.share",
+          resourceId: item.id,
+          resourceName: item.name,
+          folderSlug: item.folderSlug,
+        },
+      }).catch(() => {});
+    } catch (error) {
+      const message = error && error.errMsg || error && error.message || "转发原图失败";
+      if (!/cancel/i.test(message)) wx.showToast({ title: message, icon: "none", duration: 3000 });
+    } finally {
+      wx.hideLoading();
+    }
   },
 
   toggleEditMode() {
