@@ -108,6 +108,8 @@ test("creates 24-hour public image links without exposing album sessions", async
   assert.match(mediaShare, /Date\.parse\(record\.expiresAt\) <= Date\.now\(\)/);
   assert.match(mediaShare, /photo\.deletedAt/);
   assert.match(sharePage, /24 小时内有效/);
+  assert.match(sharePage, /查看大图/);
+  assert.match(sharePage, /public-share-image-link/);
   assert.match(imageRoute, /shared\.displayUrl/);
   assert.match(downloadRoute, /mediaDownloadUrl/);
   assert.doesNotMatch(sharePage + imageRoute + downloadRoute, /currentUser|ALBUM_SESSION_SECRET/);
