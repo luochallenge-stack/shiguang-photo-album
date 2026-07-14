@@ -59,5 +59,6 @@
   <view class="video-copy">
     <text class="video-name">{{media.name}}</text>
     <text class="video-meta">{{media.dateLabel}} · {{media.sizeLabel}}{{mode === 'image' && photos.length > 1 ? ' · ' + (index + 1) + '/' + photos.length : ''}}</text>
+    <text wx:if="{{mode === 'image'}}" class="video-hint">左右滑动切换，长按可保存或转发</text>
   </view>
 </view>
