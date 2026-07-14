@@ -242,10 +242,9 @@ Page({
 
   async generateMissingVideoCovers(photos) {
     const missing = photos
-      .filter((photo) => photo.video && !photo.thumbnailUrl && !generatingCoverIds.has(photo.id))
-      .slice(0, 2);
+      .filter((photo) => photo.video && !photo.thumbnailUrl && !generatingCoverIds.has(photo.id));
+    missing.forEach((photo) => generatingCoverIds.add(photo.id));
     for (const photo of missing) {
-      generatingCoverIds.add(photo.id);
       try {
         const result = await api.generateVideoCover(photo.id);
         const thumbnailUrl = mediaUrl(result.coverUrl);
