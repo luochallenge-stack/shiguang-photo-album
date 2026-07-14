@@ -4,6 +4,27 @@ import { currentUser, unauthenticated } from "../../../../lib/auth";
 import { createMediaShareRecord, findFolder, findPhoto } from "../../../../lib/cloudbase";
 
 const SHARE_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_PUBLIC_ORIGIN = "https://paratrooper-battalion-d1b3b82e83-1313194650.ap-shanghai.app.tcloudbase.com";
+
+function normalizePublicOrigin(value?: string | null) {
+  const origin = (value || "").trim().replace(/\/$/, "");
+  if (!origin) return "";
+  try {
+    const url = new URL(origin);
+    if (["0.0.0.0", "localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function shareOrigin(request: Request) {
+  return (
+    normalizePublicOrigin(process.env.ALBUM_PUBLIC_ORIGIN) ||
+    normalizePublicOrigin(new URL(request.url).origin) ||
+    DEFAULT_PUBLIC_ORIGIN
+  );
+}
 
 export async function POST(request: Request) {
   const user = await currentUser(request);
@@ -21,7 +42,7 @@ export async function POST(request: Request) {
     }
     const expiresAt = new Date(Date.now() + SHARE_TTL_MS).toISOString();
     const { token } = await createMediaShareRecord(photo.id, user.id, expiresAt);
-    const origin = (process.env.ALBUM_PUBLIC_ORIGIN || new URL(request.url).origin).replace(/\/$/, "");
+    const origin = shareOrigin(request);
     const shareUrl = `${origin}/s/${token}`;
     await recordAudit(request, user, {
       action: "media.share.link.create",

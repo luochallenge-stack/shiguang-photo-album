@@ -100,6 +100,8 @@ test("creates 24-hour public image links without exposing album sessions", async
     readFile(new URL("../miniprogram/pages/library/library.js", import.meta.url), "utf8"),
   ]);
   assert.match(shareRoute, /24 \* 60 \* 60 \* 1000/);
+  assert.match(shareRoute, /DEFAULT_PUBLIC_ORIGIN/);
+  assert.match(shareRoute, /0\.0\.0\.0/);
   assert.match(shareRoute, /createMediaShareRecord/);
   assert.match(shareRoute, /canUserReadFolder/);
   assert.match(shareRoute, /media\.share\.link\.create/);
