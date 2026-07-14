@@ -296,6 +296,8 @@ test("supports exact image dedupe and document uploads", async () => {
   assert.match(media, /application\/pdf/);
   assert.match(media, /application\/msword/);
   assert.match(media, /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
+  assert.match(media, /MAX_DOCUMENT_BYTES = 500 \* 1024 \* 1024/);
+  assert.match(media, /单个文档不能超过 500 MB/);
   assert.match(client, /fileContentHash/);
   assert.match(client, /上传文档/);
   assert.match(client, /DOCUMENT_FOLDER_SLUG/);
@@ -311,8 +313,12 @@ test("supports exact image dedupe and document uploads", async () => {
   assert.match(cloudbase, /DOCUMENT_FOLDER_SLUG = "documents"/);
   assert.match(cloudbase, /ensureDocumentFolder/);
   assert.match(cloudbase, /updatePhotoContentHash/);
+  assert.match(miniLibrary, /wx\.chooseFile/);
   assert.match(miniLibrary, /chooseMessageFile/);
   assert.match(miniLibrary, /chooseDocument/);
+  assert.match(miniLibrary, /chooseLocalDocument/);
+  assert.match(miniLibrary, /chooseMessageDocument/);
+  assert.match(miniLibrary, /文档不能超过 500 MB/);
   assert.match(miniLibrary, /uploadDocuments/);
   assert.match(miniLibrary, /wx\.openDocument/);
   assert.match(miniTemplate, /document-upload-button/);

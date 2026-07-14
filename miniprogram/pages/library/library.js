@@ -4,7 +4,7 @@ const PAGE_SIZE = 24;
 const COMPRESS_THRESHOLD = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
-const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = 500 * 1024 * 1024;
 const MAX_UPLOAD_COUNT = 50;
 const PICKER_BATCH_SIZE = 9;
 const MAX_BATCH_ACTION_COUNT = 100;
@@ -152,7 +152,7 @@ function compressIfNeeded(file) {
 function uploadSizeError(file) {
   const size = Number(file && file.size) || 0;
   if (!size) return "";
-  if (isDocumentName(file.name || file.tempFilePath)) return size > MAX_DOCUMENT_BYTES ? "文档不能超过 100 MB" : "";
+  if (isDocumentName(file.name || file.tempFilePath)) return size > MAX_DOCUMENT_BYTES ? "文档不能超过 500 MB" : "";
   if (isVideoFile(file) && size > MAX_VIDEO_BYTES) return "视频不能超过 500 MB";
   if (!isVideoFile(file) && size > MAX_IMAGE_BYTES) return "图片不能超过 50 MB";
   return "";
@@ -1090,19 +1090,65 @@ Page({
 
   chooseDocument() {
     if (!this.data.user.canUpload || this.data.uploading) return;
+    const actions = ["从微信聊天文件选择"];
+    const handlers = [() => this.chooseMessageDocument()];
+    if (typeof wx.chooseFile === "function") {
+      actions.unshift("从本机文件选择");
+      handlers.unshift(() => this.chooseLocalDocument());
+    }
+    if (actions.length === 1) {
+      wx.showToast({ title: "当前微信仅支持从聊天文件选择", icon: "none", duration: 2200 });
+      handlers[0]();
+      return;
+    }
+    wx.showActionSheet({
+      itemList: actions,
+      success: ({ tapIndex }) => {
+        if (handlers[tapIndex]) handlers[tapIndex]();
+      },
+    });
+  },
+
+  chooseLocalDocument() {
+    if (typeof wx.chooseFile !== "function") {
+      wx.showToast({ title: "当前微信暂不支持本机文件选择", icon: "none", duration: 2600 });
+      this.chooseMessageDocument();
+      return;
+    }
+    wx.chooseFile({
+      count: 20,
+      type: "file",
+      extension: DOCUMENT_EXTENSIONS,
+      success: ({ tempFiles }) => this.handlePickedDocuments(tempFiles),
+      fail: (error) => {
+        if (!String(error && error.errMsg || "").includes("cancel")) {
+          wx.showToast({ title: "选择文档失败", icon: "none" });
+        }
+      },
+    });
+  },
+
+  chooseMessageDocument() {
     wx.chooseMessageFile({
       count: 20,
       type: "file",
       extension: DOCUMENT_EXTENSIONS,
-      success: ({ tempFiles }) => {
-        const files = (tempFiles || []).filter((file) => isDocumentName(file.name || file.path || file.tempFilePath));
-        if (!files.length) {
-          wx.showToast({ title: "请选择 PDF 或 Word 文档", icon: "none" });
-          return;
+      success: ({ tempFiles }) => this.handlePickedDocuments(tempFiles),
+      fail: (error) => {
+        if (!String(error && error.errMsg || "").includes("cancel")) {
+          wx.showToast({ title: "选择文档失败", icon: "none" });
         }
-        this.uploadDocuments(files);
       },
     });
+  },
+
+  handlePickedDocuments(tempFiles) {
+    const files = (tempFiles || []).filter((file) => isDocumentName(file.name || file.path || file.tempFilePath));
+    if (!files.length) {
+      wx.showToast({ title: "请选择 PDF 或 Word 文档", icon: "none" });
+      return;
+    }
+    this.uploadDocuments(files);
   },
 
   async uploadDocuments(files) {

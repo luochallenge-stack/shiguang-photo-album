@@ -218,7 +218,8 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 
 - 图片使用 SHA-256 内容哈希做精确去重。Web 直传会在浏览器端计算 `contentHash`，小程序 multipart 上传由服务端读取文件后计算；如果当前用户可见范围内已有同哈希图片，接口返回 `duplicate: true` 并跳过写入。
 - 超级管理员的“图片去重”页调用 `POST /api/admin/duplicates` 扫描最多 1000 张活跃图片，给历史图片补齐 `contentHash`，按哈希分组展示；`DELETE /api/admin/duplicates` 会把重复项移入回收站，仍遵循 7 天后自动清理。
-- 文档上传只允许 PDF、DOC、DOCX，单个最大 100 MB。文档统一进入系统文件夹 `documents`（显示名“文档资料”），由 `ensureDocumentFolder` 自动创建或恢复。
+- 文档上传只允许 PDF、DOC、DOCX，单个最大 500 MB。文档统一进入系统文件夹 `documents`（显示名“文档资料”），由 `ensureDocumentFolder` 自动创建或恢复。
+- 小程序文档入口优先使用 `wx.chooseFile` 做本机文件选择；当前微信运行环境不支持时，回退到 `wx.chooseMessageFile`，也就是只能从微信聊天文件里选。
 - 文档刷新地址不能套图片处理参数；`GET /api/photos/url` 对文档直接返回原始临时 URL，小程序通过 `wx.openDocument` 打开。
 
 ## 8. API 约定

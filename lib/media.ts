@@ -2,7 +2,7 @@ export type MediaKind = "image" | "video" | "document";
 
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
-export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 500 * 1024 * 1024;
 
 const MIME_KINDS = new Map<string, MediaKind>([
   ["image/jpeg", "image"],
@@ -54,7 +54,7 @@ export function mediaSizeError(kind: MediaKind, size: number): string | null {
   if (size <= 0) return "文件内容为空";
   if (size > limit) {
     if (kind === "video") return "单个视频不能超过 500 MB";
-    if (kind === "document") return "单个文档不能超过 100 MB";
+    if (kind === "document") return "单个文档不能超过 500 MB";
     return "单张图片不能超过 50 MB";
   }
   return null;

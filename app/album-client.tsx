@@ -1323,7 +1323,7 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
             {!showRecycleBin && <button className="primary-button" onClick={() => fileInput.current?.click()} disabled={!canUpload} title={canUpload ? "上传照片或视频" : "需要上传权限"}>
               <Upload size={18} /> 上传影像
             </button>}
-            {!showRecycleBin && <button className="secondary-button" onClick={() => documentInput.current?.click()} disabled={!canDirectUpload} title={canDirectUpload ? "上传 PDF 或 Word 文档" : "需要上传权限"}>
+            {!showRecycleBin && <button className="secondary-button" onClick={() => documentInput.current?.click()} disabled={!canDirectUpload} title={canDirectUpload ? "上传 PDF 或 Word 文档，单个最大 500 MB" : "需要上传权限"}>
               <FileText size={17} /> 上传文档
             </button>}
             <input ref={fileInput} type="file" accept="image/*,video/mp4,video/quicktime,video/x-m4v,video/webm,video/mpeg,.mov,.m4v" multiple hidden onChange={onFileChange} />
