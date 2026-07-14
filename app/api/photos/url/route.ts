@@ -2,8 +2,11 @@ import { canDeleteMedia, canUserReadFolder } from "../../../../lib/access";
 import { recordAudit } from "../../../../lib/audit";
 import { currentUser, forbidden, unauthenticated } from "../../../../lib/auth";
 import { findFolder, findFolderIncludingDeleted, findPhoto, resolvePhotoUrls } from "../../../../lib/cloudbase";
+import { createHlsPlaybackToken } from "../../../../lib/hls-token";
 import { orientedImageUrl } from "../../../../lib/image-url";
 import { isDocumentMimeType, isVideoMimeType } from "../../../../lib/media";
+
+const HLS_TTL_MS = 2 * 60 * 60 * 1000;
 
 export async function GET(request: Request) {
   const user = await currentUser(request);
@@ -33,8 +36,13 @@ export async function GET(request: Request) {
       metadata: { folderSlug: photo.folderSlug },
     });
     const resolvedUrl = url || photo.url;
+    const hlsUrl = video && photo.hlsStatus === "ready" && photo.hlsRenditions?.length
+      ? `${new URL(request.url).origin}/api/photos/hls?id=${encodeURIComponent(photo.id)}&token=${encodeURIComponent(createHlsPlaybackToken(photo.id, HLS_TTL_MS))}`
+      : "";
     return Response.json({
       url: resolvedUrl,
+      hlsUrl,
+      hlsStatus: video ? photo.hlsStatus || "" : "",
       displayUrl: video || document ? resolvedUrl : orientedImageUrl(resolvedUrl),
       mimeType: photo.mimeType,
     }, {

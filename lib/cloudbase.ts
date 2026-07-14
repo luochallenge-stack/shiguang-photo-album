@@ -27,6 +27,10 @@ export type AlbumPhoto = {
   width: number | null;
   height: number | null;
   coverFileId?: string;
+  hlsStatus?: "pending" | "processing" | "ready" | "failed";
+  hlsError?: string;
+  hlsUpdatedAt?: string;
+  hlsRenditions?: AlbumHlsRendition[];
   contentHash?: string;
   createdAt: string;
   deletedAt?: string;
@@ -34,6 +38,16 @@ export type AlbumPhoto = {
   lastAction?: "upload" | "rename" | "move" | "recycle" | "restore";
   lastActionBy?: string;
   lastActionAt?: string;
+};
+
+export type AlbumHlsRendition = {
+  name: string;
+  label: string;
+  width: number;
+  height: number;
+  bandwidth: number;
+  playlist: string;
+  segments: Array<{ name: string; fileId: string }>;
 };
 
 export type AlbumPhotoPage = {
@@ -454,6 +468,31 @@ export async function updatePhotoCoverFileId(id: string, coverFileId: string): P
   await database().collection(COLLECTIONS.photos).doc(id).update({ coverFileId });
 }
 
+export async function updatePhotoHlsProcessing(id: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({
+    hlsStatus: "processing",
+    hlsError: "",
+    hlsUpdatedAt: new Date().toISOString(),
+  });
+}
+
+export async function updatePhotoHlsReady(id: string, hlsRenditions: AlbumHlsRendition[]): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({
+    hlsStatus: "ready",
+    hlsError: "",
+    hlsRenditions,
+    hlsUpdatedAt: new Date().toISOString(),
+  });
+}
+
+export async function updatePhotoHlsFailed(id: string, error: string): Promise<void> {
+  await database().collection(COLLECTIONS.photos).doc(id).update({
+    hlsStatus: "failed",
+    hlsError: error.slice(0, 500),
+    hlsUpdatedAt: new Date().toISOString(),
+  });
+}
+
 export async function getUploadTokenRecord(folderSlug: string): Promise<UploadTokenRecord | null> {
   const result = await database().collection(COLLECTIONS.uploadTokens).doc(folderSlug).get();
   return rows<UploadTokenRecord>(result)[0] || null;
@@ -564,7 +603,11 @@ export async function deletePhotoFile(fileId: string): Promise<void> {
 }
 
 export function mediaFileIds(photos: AlbumPhoto[]): string[] {
-  return photos.flatMap((photo) => [photo.fileId, photo.coverFileId || ""]).filter(Boolean);
+  return photos.flatMap((photo) => [
+    photo.fileId,
+    photo.coverFileId || "",
+    ...(photo.hlsRenditions || []).flatMap((rendition) => rendition.segments.map((segment) => segment.fileId)),
+  ]).filter(Boolean);
 }
 
 export async function purgeExpiredPhotos(now = Date.now()): Promise<number> {

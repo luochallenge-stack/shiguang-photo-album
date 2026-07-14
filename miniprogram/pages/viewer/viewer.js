@@ -1,10 +1,23 @@
 const api = require("../../utils/api");
 
 const imagePrefetching = new Set();
+const imageRefreshing = new Set();
+const imageFailedSources = new Set();
 
 function warmImageCache(url) {
   if (!url || typeof wx.getImageInfo !== "function") return;
   wx.getImageInfo({ src: url, fail() {} });
+}
+
+function imageSource(photo) {
+  return (photo && (photo.displayUrl || photo.viewerUrl || photo.previewUrl || photo.url)) || "";
+}
+
+function normalizeImagePhotos(photos) {
+  return (photos || []).map((photo) => ({
+    ...photo,
+    displayUrl: imageSource(photo),
+  }));
 }
 
 Page({
@@ -22,7 +35,7 @@ Page({
 
   onLoad(options = {}) {
     if (options.mode === "image") {
-      const photos = wx.getStorageSync("albumViewerPhotos") || [];
+      const photos = normalizeImagePhotos(wx.getStorageSync("albumViewerPhotos") || []);
       const index = Number(wx.getStorageSync("albumViewerIndex")) || 0;
       if (!photos.length) {
         wx.navigateBack();
@@ -48,30 +61,39 @@ Page({
       wx.navigateBack();
       return;
     }
-    const currentUrl = media.viewerUrl || media.previewUrl || media.url || "";
+    const currentUrl = imageSource(media);
     const targetId = media.id;
     this.setData({ media, imageUrl: currentUrl, loading: !currentUrl, waiting: false, error: "" });
     wx.setNavigationBarTitle({ title: media.name || "图片" });
     if (currentUrl) {
       warmImageCache(currentUrl);
       this.prefetchAdjacentImages();
+      return;
     }
-    api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`)
+    this.refreshImageUrl(targetId, true);
+  },
+
+  refreshImageUrl(photoId, showLoading) {
+    if (!photoId || imageRefreshing.has(photoId)) return;
+    imageRefreshing.add(photoId);
+    if (showLoading) this.setData({ loading: true, error: "" });
+    const original = this.data.photos.find((photo) => photo.id === photoId) || this.data.media || {};
+    api.request(`/api/photos/url?id=${encodeURIComponent(photoId)}`)
       .then((result) => {
-        const url = encodeURI(result.displayUrl || result.url || media.previewUrl || media.url || "");
+        const url = encodeURI(result.displayUrl || result.url || imageSource(original));
         if (!url) throw new Error("服务器没有返回图片链接");
-        const photos = this.data.photos.map((photo) => photo.id === targetId
-          ? { ...photo, viewerUrl: url }
+        const photos = this.data.photos.map((photo) => photo.id === photoId
+          ? { ...photo, viewerUrl: url, displayUrl: url }
           : photo);
         const currentMedia = this.data.media || {};
-        if (currentMedia.id === targetId) {
-          this.setData({ photos, media: { ...currentMedia, viewerUrl: url }, imageUrl: url, loading: false }, () => {
+        if (currentMedia.id === photoId) {
+          this.setData({ photos, media: { ...currentMedia, viewerUrl: url, displayUrl: url }, imageUrl: url, loading: false, error: "" }, () => {
             warmImageCache(url);
             this.prefetchAdjacentImages();
           });
           return;
         }
-        this.setData({ photos }, () => this.prefetchAdjacentImages());
+        this.setData({ photos }, () => warmImageCache(url));
       })
       .catch((error) => {
         if (error.statusCode === 401) {
@@ -79,12 +101,13 @@ Page({
           wx.reLaunch({ url: "/pages/login/login" });
           return;
         }
-        if (currentUrl) {
+        if (imageSource(this.data.media)) {
           this.setData({ loading: false });
           return;
         }
         this.setData({ loading: false, error: error.message || "图片加载失败" });
-      });
+      })
+      .finally(() => imageRefreshing.delete(photoId));
   },
 
   prefetchAdjacentImages() {
@@ -98,23 +121,9 @@ Page({
 
   prefetchImage(photo) {
     if (!photo || !photo.id || imagePrefetching.has(photo.id)) return;
-    const cachedUrl = photo.viewerUrl || "";
-    if (cachedUrl) {
-      warmImageCache(cachedUrl);
-      return;
-    }
     imagePrefetching.add(photo.id);
-    api.request(`/api/photos/url?id=${encodeURIComponent(photo.id)}`)
-      .then((result) => {
-        const url = encodeURI(result.displayUrl || result.url || photo.previewUrl || photo.url || "");
-        if (!url) return;
-        const photos = this.data.photos.map((item) => item.id === photo.id ? { ...item, viewerUrl: url } : item);
-        const state = { photos };
-        if (this.data.media && this.data.media.id === photo.id) state.media = { ...this.data.media, viewerUrl: url };
-        this.setData(state, () => warmImageCache(url));
-      })
-      .catch(() => {})
-      .finally(() => imagePrefetching.delete(photo.id));
+    warmImageCache(imageSource(photo));
+    setTimeout(() => imagePrefetching.delete(photo.id), 0);
   },
 
   handleImageSwiperChange(event) {
@@ -131,9 +140,10 @@ Page({
     const media = this.data.media;
     this.setData({ loading: true, waiting: false, error: "" });
     api.request(`/api/photos/url?id=${encodeURIComponent(media.id)}`)
-      .then(({ url }) => {
-        if (!url) throw new Error("服务器没有返回视频链接");
-        this.setData({ videoUrl: encodeURI(url), loading: false });
+      .then(({ url, hlsUrl }) => {
+        const playbackUrl = hlsUrl || url;
+        if (!playbackUrl) throw new Error("服务器没有返回视频链接");
+        this.setData({ videoUrl: encodeURI(playbackUrl), loading: false });
       })
       .catch((error) => {
         if (error.statusCode === 401) {
@@ -157,6 +167,20 @@ Page({
     this.setData({ waiting: true });
   },
 
+  handleImageError() {
+    if (this.data.mode !== "image") return;
+    const media = this.data.media || {};
+    if (!media.id) return;
+    const source = imageSource(media);
+    const failedKey = `${media.id}:${source}`;
+    if (imageFailedSources.has(failedKey)) {
+      this.setData({ loading: false, waiting: false, error: "图片暂时无法打开，请重新加载" });
+      return;
+    }
+    imageFailedSources.add(failedKey);
+    this.refreshImageUrl(media.id, true);
+  },
+
   handleVideoError(event) {
     const detail = event.detail || {};
     const message = detail.errMsg || (this.data.mode === "image" ? "图片暂时无法打开，请重新加载" : "视频暂时无法播放，请重新加载");
@@ -165,7 +189,12 @@ Page({
 
   retry() {
     if (this.data.mode === "image") {
-      this.setData({ imageUrl: "" }, () => this.loadImage());
+      const media = this.data.media || {};
+      imageFailedSources.clear();
+      this.setData({ error: "" }, () => {
+        if (media.id) this.refreshImageUrl(media.id, true);
+        else this.loadImage();
+      });
       return;
     }
     this.setData({ videoUrl: "" }, () => this.loadVideo());

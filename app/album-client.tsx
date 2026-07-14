@@ -34,7 +34,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import NextImage from "next/image";
 import { isDocumentMimeType, isVideoMimeType, mediaInfo, mediaSizeError } from "@/lib/media";
 import type { PublicAlbumUser } from "@/lib/auth";
@@ -67,6 +67,8 @@ type PhotoItem = {
   previewUrl?: string;
   coverUrl?: string;
   thumbnailUrl?: string;
+  hlsUrl?: string;
+  hlsStatus?: "pending" | "processing" | "ready" | "failed" | "";
   size: number;
   mimeType: string;
   width: number | null;
@@ -225,6 +227,65 @@ function imagePreviewUrl(photo: PhotoItem): string {
 
 function videoPosterUrl(photo: PhotoItem): string {
   return photo.coverUrl || photo.thumbnailUrl || photo.previewUrl || "";
+}
+
+function HlsVideo({
+  sourceUrl,
+  hlsUrl,
+  poster,
+  onClick,
+}: {
+  sourceUrl: string;
+  hlsUrl?: string;
+  poster?: string;
+  onClick: (event: MouseEvent<HTMLVideoElement>) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let cancelled = false;
+    let destroy: (() => void) | undefined;
+    const fallback = () => {
+      if (cancelled) return;
+      video.src = sourceUrl;
+      video.load();
+    };
+    if (!hlsUrl) {
+      fallback();
+      return undefined;
+    }
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = hlsUrl;
+      video.load();
+      return undefined;
+    }
+    void import("hls.js")
+      .then(({ default: Hls }) => {
+        if (cancelled) return;
+        if (!Hls.isSupported()) {
+          fallback();
+          return;
+        }
+        const hls = new Hls({
+          enableWorker: true,
+          maxBufferLength: 30,
+          backBufferLength: 30,
+        });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+        destroy = () => hls.destroy();
+      })
+      .catch(fallback);
+    return () => {
+      cancelled = true;
+      destroy?.();
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, [sourceUrl, hlsUrl]);
+
+  return <video ref={videoRef} poster={poster} controls autoPlay playsInline preload="metadata" onClick={onClick} />;
 }
 
 function VisibilityFields({
@@ -1095,6 +1156,15 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
     }
     setPreview(photo);
     logMediaAccess(photo, "media.view");
+    if (isVideoMimeType(photo.mimeType)) {
+      void fetch(`/api/photos/url?id=${encodeURIComponent(photo.id)}`)
+        .then((response) => readJson<{ url: string; hlsUrl?: string; hlsStatus?: PhotoItem["hlsStatus"] }>(response))
+        .then((playback) => {
+        setPreview((current) => current?.id === photo.id
+          ? { ...current, url: playback.url || current.url, hlsUrl: playback.hlsUrl || "", hlsStatus: playback.hlsStatus || current.hlsStatus || "" }
+          : current);
+      }).catch(() => undefined);
+    }
   };
 
   const showAdjacentPreview = (direction: -1 | 1) => {
@@ -1932,14 +2002,11 @@ export default function Home({ initialUser }: { initialUser: PublicAlbumUser }) 
               </>
             )}
             {isVideoMimeType(preview.mimeType)
-              ? <video
+              ? <HlsVideo
                   key={preview.id}
-                  src={preview.url}
+                  sourceUrl={preview.url}
+                  hlsUrl={preview.hlsUrl}
                   poster={videoPosterUrl(preview) || undefined}
-                  controls
-                  autoPlay
-                  playsInline
-                  preload="metadata"
                   onClick={(event) => event.stopPropagation()}
                 />
               : <img src={imagePreviewUrl(preview)} alt={preview.name} onClick={(event) => event.stopPropagation()} />}

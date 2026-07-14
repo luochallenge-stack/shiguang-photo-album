@@ -349,13 +349,18 @@ Web 使用直传，避免大视频经过 CloudBase Run 请求体：
 - 负责视频播放和图片全屏滑动预览。
 - 视频进入页面后按媒体 ID 获取新的 2 小时临时地址，并用 `thumbnailUrl / coverUrl / previewUrl` 作为 poster，降低黑屏首帧等待。
 - 图片进入页面后优先展示已有预览地址，后台刷新当前高清地址，并预取左右相邻图片的临时地址与图片缓存，减少连续滑动卡顿。
+- 图片 Swiper 中的 `displayUrl` 要保持稳定，滑动过程中不要因为后台刷新临时地址而立刻替换可见图片 `src`，否则会产生闪屏；只有加载失败或用户重试时才刷新当前图地址。
 - 处理 metadata、播放、缓冲、错误和重试状态。
 - 播放地址和图片临时地址必须经过 `encodeURI`。
 
 播放器策略：
 
-- 当前不直接引入 Video.js / Plyr，因为它们主要改善 Web 播放器控件、皮肤和 API，不能单独解决原始大视频的网络缓冲。
-- 如果后续要做真正的弱网流畅播放，应在上传后转码为 HLS 多码率分片，再在 PC 端接入 hls.js 或 Video.js；小程序端继续优先使用原生 `<video>` 播放可访问的视频地址。
+- 上传视频登记成功后会异步调用 `startPhotoHlsTranscode(photo.id)`，不阻塞上传成功提示。
+- `lib/video-hls.ts` 使用 ffmpeg/ffprobe 转出 360p/720p HLS 分片；`album_photos` 记录 `hlsStatus / hlsRenditions / hlsError`。
+- `/api/photos/url` 在 HLS ready 时返回带临时签名的 `hlsUrl`，否则只返回原视频地址。
+- `/api/photos/hls` 动态生成 master/variant m3u8，并把每个 `.ts` 分片行替换为 CloudBase 临时 URL；不要把永久 m3u8 文件直接暴露给小程序，因为分片 URL 需要按需签发。
+- Web 端用 `hls.js` 播放 m3u8，失败时回退原视频；小程序端仍使用原生 `<video>`，优先传入 `hlsUrl || url`。
+- `Video.js / Plyr` 主要改善播放器控件、皮肤和 API；当前真正改善弱网体验的是 HLS 多码率分片。
 
 小程序增加新 API 时，优先复用 `utils/api.js`，不要在页面中重复实现认证头和错误解析。
 

@@ -17,6 +17,7 @@ import { recordAudit } from "../../../lib/audit";
 import { isDocumentMimeType, isVideoMimeType, mediaInfo, mediaSizeError } from "../../../lib/media";
 import { extractVideoCover } from "../../../lib/video-cover";
 import { sha256Hex } from "../../../lib/content-hash";
+import { startPhotoHlsTranscode } from "../../../lib/hls-transcode-job";
 
 const RECYCLE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -115,6 +116,7 @@ export async function POST(request: Request) {
       resourceName: photo.name,
       metadata: { folderSlug, size: photo.size, mimeType: photo.mimeType },
     });
+    if (media.kind === "video") startPhotoHlsTranscode(photo.id);
     return Response.json({ photo }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "保存文件信息失败";

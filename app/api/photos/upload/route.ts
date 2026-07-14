@@ -23,6 +23,7 @@ import { currentUser, unauthenticated } from "../../../../lib/auth";
 import { recordAudit } from "../../../../lib/audit";
 import { mediaInfo, mediaSizeError } from "../../../../lib/media";
 import { normalizeContentHash } from "../../../../lib/content-hash";
+import { startPhotoHlsTranscode } from "../../../../lib/hls-transcode-job";
 
 function dimension(value: unknown): number | null {
   const number = Number(value);
@@ -166,6 +167,7 @@ export async function PATCH(request: Request) {
       resourceName: photo.name,
       metadata: { folderSlug: photo.folderSlug, size: photo.size, mimeType: photo.mimeType },
     });
+    if (media.kind === "video") startPhotoHlsTranscode(photo.id);
     return Response.json({ photo: { ...photo, url: url || photo.url } }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "登记上传文件失败";

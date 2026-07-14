@@ -62,8 +62,51 @@ test("builds the authenticated photo and video album surface", async () => {
   assert.match(client, /videoPosterUrl/);
   assert.match(client, /poster=\{videoPosterUrl\(preview\) \|\| undefined\}/);
   assert.match(client, /preload="metadata"/);
+  assert.match(client, /HlsVideo/);
+  assert.match(client, /import\("hls\.js"\)/);
   assert.doesNotMatch(client, /<video src=\{photo\.url\} muted playsInline preload="metadata"/);
   assert.doesNotMatch(page + client + layout, /codex-preview|Your site is taking shape/);
+});
+
+test("supports non-blocking HLS transcode for weak-network video playback", async () => {
+  const [packageJson, client, uploadRoute, multipartRoute, urlRoute, hlsRoute, transcodeRoute, hlsJob, videoHls, hlsToken, cloudbase, miniViewer] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/album-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/upload/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/url/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/hls/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/photos/hls/transcode/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hls-transcode-job.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/video-hls.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/hls-token.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/cloudbase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../miniprogram/pages/viewer/viewer.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(packageJson, /"hls\.js"/);
+  assert.match(cloudbase, /hlsStatus/);
+  assert.match(cloudbase, /hlsRenditions/);
+  assert.match(cloudbase, /updatePhotoHlsReady/);
+  assert.match(cloudbase, /rendition\.segments\.map/);
+  assert.match(uploadRoute, /startPhotoHlsTranscode\(photo\.id\)/);
+  assert.match(multipartRoute, /startPhotoHlsTranscode\(photo\.id\)/);
+  assert.match(urlRoute, /hlsUrl/);
+  assert.match(urlRoute, /createHlsPlaybackToken/);
+  assert.match(hlsRoute, /application\/vnd\.apple\.mpegurl/);
+  assert.match(hlsRoute, /#EXT-X-STREAM-INF/);
+  assert.match(hlsRoute, /verifyHlsPlaybackToken/);
+  assert.match(transcodeRoute, /transcodePhotoToHls/);
+  assert.match(transcodeRoute, /video\.hls\.transcode/);
+  assert.match(hlsJob, /transcodeVideoToHls/);
+  assert.match(hlsJob, /updatePhotoHlsProcessing/);
+  assert.match(videoHls, /ffprobe/);
+  assert.match(videoHls, /-hls_playlist_type/);
+  assert.match(videoHls, /360p/);
+  assert.match(videoHls, /720p/);
+  assert.match(hlsToken, /createHlsPlaybackToken/);
+  assert.match(client, /hlsUrl/);
+  assert.match(client, /Hls\.isSupported/);
+  assert.match(miniViewer, /hlsUrl \|\| url/);
 });
 
 test("keeps CloudBase credentials server-side", async () => {
@@ -268,9 +311,11 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(viewer, /<video/);
   assert.match(viewer, /poster="\{\{media\.thumbnailUrl \|\| media\.coverUrl \|\| media\.previewUrl \|\| ''\}\}"/);
   assert.match(viewer, /<swiper/);
+  assert.match(viewer, /src="\{\{item\.displayUrl \|\| item\.viewerUrl \|\| item\.previewUrl \|\| item\.url\}\}"/);
   assert.match(viewer, /mode="aspectFit"/);
   assert.match(viewer, /bindchange="handleImageSwiperChange"/);
   assert.match(viewer, /show-menu-by-longpress="\{\{true\}\}"/);
+  assert.match(viewer, /binderror="handleImageError"/);
   assert.match(viewer, /wx:if="\{\{mode !== 'image'\}\}" class="video-copy"/);
   assert.doesNotMatch(viewer, /长按可保存或转发/);
   assert.match(viewer, /closeImage/);
@@ -279,10 +324,14 @@ test("ships a native WeChat mini program with token authentication", async () =>
   assert.match(viewerLogic, /albumViewerPhotos/);
   assert.match(viewerLogic, /mode: "image"/);
   assert.match(viewerLogic, /handleImageSwiperChange/);
+  assert.match(viewerLogic, /normalizeImagePhotos/);
+  assert.match(viewerLogic, /displayUrl/);
   assert.match(viewerLogic, /prefetchAdjacentImages/);
   assert.match(viewerLogic, /warmImageCache/);
   assert.match(viewerLogic, /imagePrefetching/);
-  assert.match(viewerLogic, /encodeURI\(url\)/);
+  assert.match(viewerLogic, /imageFailedSources/);
+  assert.match(viewerLogic, /encodeURI\(result\.displayUrl/);
+  assert.match(viewerLogic, /encodeURI\(playbackUrl\)/);
   assert.match(viewerLogic, /handleVideoError/);
   assert.match(libraryRoute, /MINI_PROGRAM_PAGE_SIZE = 24/);
   assert.match(libraryRoute, /thumbnailUrl/);

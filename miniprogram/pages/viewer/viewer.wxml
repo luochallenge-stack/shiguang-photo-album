@@ -11,12 +11,12 @@
       <swiper-item wx:for="{{photos}}" wx:key="id">
         <image
           class="image-player"
-          src="{{item.viewerUrl || item.previewUrl || item.url}}"
+          src="{{item.displayUrl || item.viewerUrl || item.previewUrl || item.url}}"
           mode="aspectFit"
           show-menu-by-longpress="{{true}}"
           bindtap="closeImage"
           bindload="handleLoaded"
-          binderror="handleVideoError"
+          binderror="handleImageError"
         />
       </swiper-item>
     </swiper>
